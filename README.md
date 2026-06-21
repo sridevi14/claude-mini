@@ -84,4 +84,21 @@ internal/tools   read · write · edit · search · run
 internal/ui      rendering, diffs, the live status line
 ```
 
-Made for fun with [Claude Code](https://claude.com/claude-code).
+## Contributing
+
+Issues and PRs welcome. If you're adding a tool or provider, keep it
+dependency-light — that's the whole point. Open an issue first for anything big.
+
+1. Fork & branch (`git checkout -b feat/my-thing`)
+2. `go build -o claude-mini .` and try it
+3. `go test ./...`
+4. Open a PR
+
+## License
+
+MIT © 2026 sridevi14 — see [LICENSE](LICENSE).
+
+## Acknowledgments
+
+Inspired by [Claude Code](https://www.anthropic.com/claude-code) and the wave of
+terminal coding agents. Built with Go and the standard library, mostly.
