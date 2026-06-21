@@ -9,7 +9,6 @@ import (
 	"strings"
 
 	"github.com/eiannone/keyboard"
-
 	"github.com/sridevi14/claude-mini/internal/agent"
 	"github.com/sridevi14/claude-mini/internal/ignore"
 	"github.com/sridevi14/claude-mini/internal/llm"
@@ -17,11 +16,6 @@ import (
 	"github.com/sridevi14/claude-mini/internal/session"
 	"github.com/sridevi14/claude-mini/internal/tools"
 	"github.com/sridevi14/claude-mini/internal/ui"
-)
-
-const (
-	baseURL = "https://api.openadapter.in/v1"
-	model   = "deepseek-v3"
 )
 
 // loadDotEnv reads simple KEY=VALUE lines from a .env file (if present) and
@@ -60,10 +54,15 @@ func loadDotEnv(path string) {
 func main() {
 	loadDotEnv(".env")
 
-	apiKey := resolveAPIKey()
-	if apiKey == "" {
-		fmt.Fprintln(os.Stderr, ui.Red+"No OpenAdapter API key provided."+ui.Reset)
-		fmt.Fprintln(os.Stderr, ui.Gray+"  run again in a terminal to enter it, or set "+envKeyName+"=sk-… for scripted use."+ui.Reset)
+	firstRun := isFirstRun()
+	cfg := resolveSettings()
+	// A key is mandatory for scripted/non-interactive use; in a real terminal we let
+	// the user in anyway so they can pick a provider (e.g. free local Ollama) or add
+	// a key with /login from inside the app.
+	if cfg.APIKey == "" && !ui.Interactive() {
+		fmt.Fprintln(os.Stderr, ui.Red+"No API key provided for "+cfg.BaseURL+"."+ui.Reset)
+		fmt.Fprintln(os.Stderr, ui.Gray+"  set "+envAPIKey+"=… (with "+envBaseURL+" / "+envModel+"), "+
+			"or run in a terminal to set one up interactively."+ui.Reset)
 		os.Exit(1)
 	}
 
@@ -81,7 +80,7 @@ func main() {
 	defer sess.Close()
 
 	ign := ignore.New(root)
-	client := llm.New(baseURL, apiKey, model)
+	client := llm.New(cfg.BaseURL, cfg.APIKey, cfg.Model)
 	reg := tools.New(root, sess, ign)
 	defer reg.Cleanup()
 
@@ -94,9 +93,13 @@ func main() {
 		ag.SetInterruptWatcher(escWatcher)
 	}
 
-	ui.Banner(client.Model, root)
+	printWelcome(client, root, firstRun)
+	if cfg.APIKey == "" {
+		ui.Errorf("No API key yet — run /provider (pick Ollama for free, no key) or /login to add one.")
+	}
 
 	ctx := context.Background()
+	hintedEmpty := false
 	for {
 		input, ok := ui.ReadTask(mentions.Matches)
 		if !ok {
@@ -104,6 +107,11 @@ func main() {
 		}
 		input = strings.TrimSpace(input)
 		if input == "" {
+			// Nudge first-timers who press Enter at the blank prompt.
+			if !hintedEmpty {
+				ui.Info("  Type a task in plain English (e.g. \"create hello.txt\"), or /help.")
+				hintedEmpty = true
+			}
 			continue
 		}
 		if strings.HasPrefix(input, "/") {
@@ -117,6 +125,44 @@ func main() {
 		ag.Run(ctx, mentions.Expand(input))
 	}
 	ui.Info("\n  bye.")
+}
+
+// printWelcome renders the startup screen: a friendly header, the current setup in
+// plain words, a few example tasks (so a newcomer isn't facing a blank prompt), and
+// the handful of commands they'll actually use. The very first run adds a one-line,
+// jargon-free explanation of what the tool is.
+func printWelcome(client *llm.Client, root string, firstRun bool) {
+	b, c, g, r, grn := ui.Bold, ui.Cyan, ui.Gray, ui.Reset, ui.Green
+
+	fmt.Println()
+	fmt.Println("  " + b + c + "◆ mini-code" + r + g + "  ·  your terminal coding assistant" + r)
+
+	if firstRun {
+		fmt.Println()
+		fmt.Println("  " + b + "Welcome! 👋" + r)
+		fmt.Println(g + "  Tell it what you want in plain English and it reads and edits files in" + r)
+		fmt.Println(g + "  this folder to do it — like a teammate who can also run commands." + r)
+	}
+
+	fmt.Println()
+	fmt.Println("  " + grn + "✓ Ready" + r + g + "  using " + r + client.Model + g + "  (" + r + providerLabel(client.BaseURL) + g + ")" + r)
+	fmt.Println(g + "  folder " + r + root)
+
+	fmt.Println()
+	fmt.Println("  " + b + "Try typing" + r + g + " (then press Enter):" + r)
+	for _, ex := range []string{
+		"create a file hello.txt that says hi",
+		"explain what main.go does",
+		"add a test for the add function and run it",
+	} {
+		fmt.Println(g + "    • " + r + ex)
+	}
+
+	fmt.Println()
+	fmt.Printf("  %sCommands%s   %s/help%s all  ·  %s/provider%s change AI  ·  %s/model%s change model  ·  %s/exit%s quit\n",
+		b, r, c, r, c, r, c, r, c, r)
+	fmt.Println(g + "  Shortcuts  " + r + "Esc" + g + " pause   " + r + "@" + g + " attach a file   " + r + "/undo" + g + " undo last change" + r)
+	fmt.Println(g + "  " + strings.Repeat("─", 60) + r)
 }
 
 // escWatcher listens for the Esc key while the agent is streaming and cancels the
@@ -149,31 +195,37 @@ func handleCommand(cmd string, sess *session.Session, reg *tools.Registry, cost 
 	case "/exit", "/quit", "/q":
 		return true
 	case "/help":
-		ui.Info("commands:")
-		ui.Info("  /model   list coding models and switch the active one")
-		ui.Info("  /login   enter or change your OpenAdapter API key")
-		ui.Info("  /resume  reload the previous session's conversation")
-		ui.Info("  /undo    revert the last file write")
-		ui.Info("  /cost    show token usage and estimated cost")
-		ui.Info("  /tools   list available tools")
-		ui.Info("  /getkey    get apikey")
-		ui.Info("  /exit    quit")
-		ui.Info("type @ to pick a file from the live dropdown and attach its contents.")
-		ui.Info("shortcut: press Esc while the agent is working to pause, then type more instructions to continue.")
-		ui.Info("anything else is sent to the agent as a task.")
+		ui.Info("Just type what you want in plain English — e.g. \"add error handling to main.go\".")
+		ui.Info("")
+		ui.Info("Commands:")
+		ui.Info("  /provider  switch AI service (OpenAI, OpenRouter, Ollama, other…)")
+		ui.Info("  /model     change the model — or type any model name")
+		ui.Info("  /login     add or change your API key")
+		ui.Info("  /config    show your current setup")
+		ui.Info("  /undo      undo the last file change")
+		ui.Info("  /resume    continue your previous session")
+		ui.Info("  /cost      show token usage and estimated cost")
+		ui.Info("  /tools     list what the agent can do")
+		ui.Info("  /exit      quit  (or press Ctrl+D)")
+		ui.Info("")
+		ui.Info("Shortcuts:  Esc pause the agent   ·   @ attach a file to your message")
 	case "/model", "/models":
 		switchModel(client)
+	case "/provider", "/providers":
+		switchProvider(client)
+	case "/config":
+		showConfig(client)
 	case "/login", "/key":
-		key, ok := ui.ReadSecret(ui.Bold + "  OpenAdapter API key › " + ui.Reset)
+		key, ok := ui.ReadSecret(ui.Bold + "  " + providerLabel(client.BaseURL) + " API key › " + ui.Reset)
 		if !ok || key == "" {
 			ui.Info("  unchanged.")
 			return false
 		}
 		client.APIKey = key
-		if err := saveKey(key); err != nil {
-			ui.Errorf("key updated for this session, but couldn't save it: %v", err)
+		if err := saveKeyFor(client.BaseURL, key); err != nil {
+			ui.Errorf("key updated for now, but couldn't save it: %v", err)
 		} else {
-			ui.Success("key updated and saved")
+			ui.Success("Key saved for %s.", providerLabel(client.BaseURL))
 		}
 	case "/resume":
 		prev := session.LastTranscript(root, sess.Path())
@@ -210,50 +262,122 @@ func handleCommand(cmd string, sess *session.Session, reg *tools.Registry, cost 
 		for _, n := range reg.Names() {
 			ui.Info("  • %s", n)
 		}
-	case "/getkey":
-		ui.Info("ApiKey:")
-		apiKey := resolveAPIKey()
-		fmt.Println(apiKey, "apiKey")
-
 	default:
 		ui.Errorf("unknown command %q (try /help)", cmd)
 	}
 	return false
 }
 
-// switchModel shows a shortlist of coding models and switches the active one.
-// The change applies to the next message (the client model is read per request).
+// switchProvider switches the active endpoint. The user picks a known preset
+// (openai, openrouter, ollama, …) or "custom" to enter any OpenAI-compatible base
+// URL. It then ensures a key exists for that provider (reusing a saved one or
+// prompting), suggests a default model, and persists the choice.
+func switchProvider(client *llm.Client) {
+	presets := providerPresets()
+	var labels []string
+	for _, p := range presets {
+		labels = append(labels, fmt.Sprintf("%-12s %s", p.Label, p.Blurb))
+	}
+	labels = append(labels, fmt.Sprintf("%-12s %s", "Other…", "paste any other AI service URL"))
+
+	q := fmt.Sprintf("Which AI service do you want to use?  (now: %s)", providerLabel(client.BaseURL))
+	choice := strings.TrimSpace(ui.AskUser(q, labels))
+	base, ok := providerBaseFromChoice(choice, presets)
+	if !ok || base == "" {
+		ui.Info("  provider unchanged.")
+		return
+	}
+	base = normalizeBase(base)
+	client.BaseURL = base
+
+	// Reuse a saved/env key for this provider, fall back to its default (Ollama),
+	// otherwise prompt for one.
+	key := firstNonEmpty(os.Getenv(envAPIKey), savedKeyFor(base))
+	if key == "" {
+		if p, found := providerFor(base); found {
+			key = p.DefaultKey
+		}
+	}
+	if key == "" {
+		key = promptForKey(base)
+	}
+	if key != "" {
+		client.APIKey = key
+	} else {
+		ui.Errorf("no API key set for %s — use /login before sending a task.", base)
+	}
+
+	// Land on a model that exists for this provider.
+	if p, found := providerFor(base); found && len(p.Models) > 0 {
+		client.Model = p.Models[0]
+	}
+	if err := saveActive(base, client.Model); err != nil {
+		ui.Errorf("switched for now, but couldn't save it: %v", err)
+	}
+	ui.Success("Now using %s  ·  model %s", providerLabel(base), client.Model)
+	ui.Info("  Type /model to change the model, or just start typing a task.")
+}
+
+// providerBaseFromChoice maps an AskUser result to a base URL: a preset name/label,
+// a typed URL, or the "custom" option (which prompts for the URL).
+func providerBaseFromChoice(choice string, presets []provider) (string, bool) {
+	if choice == "" {
+		return "", false
+	}
+	for _, p := range presets {
+		// Accept either the friendly label ("OpenAI …") or the short name ("openai").
+		if strings.EqualFold(choice, p.Name) || strings.EqualFold(choice, p.Label) ||
+			strings.HasPrefix(choice, p.Label+" ") || strings.HasPrefix(choice, p.Name+" ") {
+			return p.BaseURL, true
+		}
+	}
+	lc := strings.ToLower(choice)
+	if strings.HasPrefix(lc, "other") || strings.HasPrefix(lc, "custom") {
+		url, ok := ui.ReadLine(ui.Bold + "  Paste the service URL (e.g. https://api.example.com/v1): " + ui.Reset)
+		url = strings.TrimSpace(url)
+		if !ok || url == "" {
+			return "", false
+		}
+		return url, true
+	}
+	if strings.Contains(choice, "://") { // user typed a base URL directly
+		return choice, true
+	}
+	return "", false
+}
+
+// switchModel shows a provider-aware shortlist and switches the active model. The
+// user may also type any model id. The change is persisted and applies next turn.
 func switchModel(client *llm.Client) {
-	models := modelChoices(client.Model)
-	q := fmt.Sprintf("select a coding model (current: %s) — pick a number, or type any model id", client.Model)
+	models := modelChoices(client.BaseURL, client.Model)
+	q := fmt.Sprintf("Pick a model, or type any model name  (now: %s)", client.Model)
 	choice := strings.TrimSpace(ui.AskUser(q, models))
 	if choice == "" || choice == client.Model {
-		ui.Info("  keeping %s", client.Model)
+		ui.Info("  Keeping %s.", client.Model)
 		return
 	}
 	client.Model = choice
-	ui.Success("model switched to %s — applies to your next message", choice)
+	if err := saveModelPref(choice); err != nil {
+		ui.Success("Now using %s (this session)", choice)
+	} else {
+		ui.Success("Now using %s", choice)
+	}
 }
 
-// modelChoices returns the curated coding-model shortlist. Override the list with
-// the MINI_MODELS env var (comma-separated). The current model is always included.
-func modelChoices(current string) []string {
-	list := []string{
-		"deepseek-v3",
-		"glm-4.5",
-		"qwen2.5-coder-32b-instruct",
-		"kimi-k2-instruct",
-		"deepseek-coder-v2",
-	}
-	if v := strings.TrimSpace(os.Getenv("MINI_MODELS")); v != "" {
-		list = nil
+// modelChoices returns the shortlist for /model: the CLAUDE_MINI_MODELS override if
+// set, else the active provider's suggested models, else just the current model.
+// The current model is always selectable.
+func modelChoices(base, current string) []string {
+	var list []string
+	if v := strings.TrimSpace(os.Getenv(envModels)); v != "" {
 		for _, p := range strings.Split(v, ",") {
 			if p = strings.TrimSpace(p); p != "" {
 				list = append(list, p)
 			}
 		}
+	} else if p, ok := providerFor(base); ok {
+		list = append(list, p.Models...)
 	}
-	// Ensure the current model is selectable.
 	found := false
 	for _, m := range list {
 		if m == current {
@@ -265,4 +389,16 @@ func modelChoices(current string) []string {
 		list = append([]string{current}, list...)
 	}
 	return list
+}
+
+// showConfig prints the active provider, base URL, model and a masked key.
+func showConfig(client *llm.Client) {
+	ui.Info("Your current setup:")
+	ui.Info("  AI service  %s", providerLabel(client.BaseURL))
+	ui.Info("  model       %s", client.Model)
+	ui.Info("  API key     %s", maskKey(client.APIKey))
+	ui.Info("  endpoint    %s", client.BaseURL)
+	if p, err := configPath(); err == nil {
+		ui.Info("  saved in    %s", p)
+	}
 }
