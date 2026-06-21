@@ -9,6 +9,7 @@ import (
 
 	prompt "github.com/c-bata/go-prompt"
 	"github.com/mattn/go-isatty"
+	"golang.org/x/term"
 )
 
 // ANSI styles.
@@ -51,21 +52,69 @@ func ReadLine(prompt string) (string, bool) {
 	return strings.TrimRight(line, "\r\n"), true
 }
 
+// ReadSecret prompts for sensitive input (e.g. an API key) and reads it without
+// echoing the characters to the terminal. On a non-TTY stdin (pipes/CI) it falls
+// back to a normal visible read so scripted use still works. The bool is false on
+// EOF/error.
+func ReadSecret(promptText string) (string, bool) {
+	fmt.Print(promptText)
+	fd := int(os.Stdin.Fd())
+	if term.IsTerminal(fd) {
+		if b, err := term.ReadPassword(fd); err == nil {
+			fmt.Println() // ReadPassword swallows the newline; restore it
+			return strings.TrimSpace(string(b)), true
+		}
+		// Hidden read failed on this terminal — fall through to a visible read so
+		// the user can still enter the key (rather than being stuck).
+	}
+	line, err := stdin.ReadString('\n')
+	if err != nil && line == "" {
+		return "", false
+	}
+	return strings.TrimSpace(line), true
+}
+
 // Interactive reports whether stdin is a real terminal (so rich input is usable).
 func Interactive() bool {
 	fd := os.Stdin.Fd()
 	return isatty.IsTerminal(fd) || isatty.IsCygwinTerminal(fd)
 }
 
-// ReadTask reads one task line. On a real terminal it offers a live @file
+// ReadTask reads one task line. On a capable terminal it offers a live @file
 // completion dropdown (type @, then letters to filter; arrow keys to navigate;
-// Tab/Enter to accept). When stdin isn't a TTY (pipes, CI), it falls back to
-// plain line input. complete(token) returns candidate paths for the @token being
-// typed (directories carry a trailing "/").
+// Tab/Enter to accept). When stdin isn't a TTY (pipes, CI), when MINI_SIMPLE_INPUT
+// is set, or if the rich-input library can't drive this terminal, it falls back
+// to plain line input — @mentions still resolve on submit, just without the live
+// dropdown. complete(token) returns candidate paths for the @token being typed
+// (directories carry a trailing "/").
 func ReadTask(complete func(token string) []string) (string, bool) {
-	if !Interactive() {
-		return ReadLine("\n" + Bold + Cyan + "› " + Reset)
+	if !Interactive() || simpleInput() {
+		return readTaskPlain()
 	}
+	line, ok := readTaskRich(complete)
+	if !ok {
+		// The rich input layer couldn't run in this terminal — degrade gracefully
+		// for this and every later read instead of leaving the user stuck.
+		forceSimpleInput()
+		return readTaskPlain()
+	}
+	return line, true
+}
+
+func readTaskPlain() (string, bool) {
+	return ReadLine("\n" + Bold + Cyan + "› " + Reset)
+}
+
+// readTaskRich runs the go-prompt dropdown. go-prompt can panic on terminals it
+// doesn't understand (some Windows consoles, ConPTY, restricted shells); we
+// recover so the caller can fall back to plain input rather than crash. ok is
+// false when the rich layer failed.
+func readTaskRich(complete func(token string) []string) (line string, ok bool) {
+	defer func() {
+		if r := recover(); r != nil {
+			ok = false
+		}
+	}()
 	completer := func(d prompt.Document) []prompt.Suggest {
 		word := d.GetWordBeforeCursor()
 		if !strings.HasPrefix(word, "@") {
@@ -83,11 +132,32 @@ func ReadTask(complete func(token string) []string) (string, bool) {
 		return sug
 	}
 	fmt.Println()
-	line := prompt.Input("› ", completer,
+	line = prompt.Input("› ", completer,
 		prompt.OptionPrefixTextColor(prompt.Cyan),
 		prompt.OptionCompletionWordSeparator(" "),
 	)
 	return line, true
+}
+
+// simpleInputForced is set once the rich input layer has failed, so we don't keep
+// retrying it every prompt.
+var simpleInputForced bool
+
+func forceSimpleInput() {
+	if !simpleInputForced {
+		simpleInputForced = true
+		Info("  (switched to simple input — @ still works on submit; set MINI_SIMPLE_INPUT=1 to keep it)")
+	}
+}
+
+// simpleInput reports whether the plain line reader should be used instead of the
+// rich dropdown — either forced by env or after a prior rich-input failure.
+func simpleInput() bool {
+	if simpleInputForced {
+		return true
+	}
+	v := strings.TrimSpace(os.Getenv("MINI_SIMPLE_INPUT"))
+	return v != "" && v != "0" && strings.ToLower(v) != "false"
 }
 
 // Info prints a dim informational line.

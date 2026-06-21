@@ -60,10 +60,10 @@ func loadDotEnv(path string) {
 func main() {
 	loadDotEnv(".env")
 
-	apiKey := os.Getenv("OPENADAPTER_API_KEY")
+	apiKey := resolveAPIKey()
 	if apiKey == "" {
-		fmt.Fprintln(os.Stderr, ui.Red+"OPENADAPTER_API_KEY is not set."+ui.Reset)
-		fmt.Fprintln(os.Stderr, ui.Gray+"  set it and try again, e.g.  export OPENADAPTER_API_KEY=sk-...."+ui.Reset)
+		fmt.Fprintln(os.Stderr, ui.Red+"No OpenAdapter API key provided."+ui.Reset)
+		fmt.Fprintln(os.Stderr, ui.Gray+"  run again in a terminal to enter it, or set "+envKeyName+"=sk-… for scripted use."+ui.Reset)
 		os.Exit(1)
 	}
 
@@ -151,6 +151,7 @@ func handleCommand(cmd string, sess *session.Session, reg *tools.Registry, cost 
 	case "/help":
 		ui.Info("commands:")
 		ui.Info("  /model   list coding models and switch the active one")
+		ui.Info("  /login   enter or change your OpenAdapter API key")
 		ui.Info("  /resume  reload the previous session's conversation")
 		ui.Info("  /undo    revert the last file write")
 		ui.Info("  /cost    show token usage and estimated cost")
@@ -161,6 +162,18 @@ func handleCommand(cmd string, sess *session.Session, reg *tools.Registry, cost 
 		ui.Info("anything else is sent to the agent as a task.")
 	case "/model", "/models":
 		switchModel(client)
+	case "/login", "/key":
+		key, ok := ui.ReadSecret(ui.Bold + "  OpenAdapter API key › " + ui.Reset)
+		if !ok || key == "" {
+			ui.Info("  unchanged.")
+			return false
+		}
+		client.APIKey = key
+		if err := saveKey(key); err != nil {
+			ui.Errorf("key updated for this session, but couldn't save it: %v", err)
+		} else {
+			ui.Success("key updated and saved")
+		}
 	case "/resume":
 		prev := session.LastTranscript(root, sess.Path())
 		if prev == "" {
