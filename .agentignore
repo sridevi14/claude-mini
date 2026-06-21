@@ -1,0 +1,4 @@
+# Extra paths the agent should not read/search/list (same syntax as .gitignore).
+# .git/ and .mini_agent/ are always ignored.
+mini.exe
+*.exe

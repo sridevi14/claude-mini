@@ -1,0 +1,12 @@
+# secrets — never commit the API key
+.env
+.env.local
+
+# build artifacts
+mini.exe
+*.exe
+
+# runtime state (logs, transcripts, server output)
+.mini_agent/
+hyrenet-login/
+__pycache__/
