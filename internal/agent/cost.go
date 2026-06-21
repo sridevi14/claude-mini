@@ -47,8 +47,9 @@ func (c *Cost) USD() float64 {
 	return float64(c.PromptTokens)/1e6*c.priceIn + float64(c.CompletionTokens)/1e6*c.priceOut
 }
 
-// Line renders a one-line footer.
+// Line renders a one-line usage footer with a token breakdown and estimated cost.
 func (c *Cost) Line() string {
-	return fmt.Sprintf("%s  %d in / %d out tokens · ~$%.4f (est.)%s",
-		ui.Gray, c.PromptTokens, c.CompletionTokens, c.USD(), ui.Reset)
+	total := c.PromptTokens + c.CompletionTokens
+	return fmt.Sprintf("%s  ↑ %s in · ↓ %s out · %s total · ~$%.4f (est.)%s",
+		ui.Gray, kfmt(c.PromptTokens), kfmt(c.CompletionTokens), kfmt(total), c.USD(), ui.Reset)
 }

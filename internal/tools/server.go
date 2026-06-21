@@ -82,6 +82,6 @@ func (t *runServer) Run(_ context.Context, args map[string]any) (string, error) 
 	t.r.servers = append(t.r.servers, &serverProc{name: name, cmd: cmd, log: logPath})
 
 	relLog, _ := filepath.Rel(t.r.root, logPath)
-	return fmt.Sprintf("started '%s' (pid %d). Logs streaming to %s. It will be killed when mini-code exits.",
+	return fmt.Sprintf("started '%s' (pid %d). Logs streaming to %s. It will be killed when claude-mini exits.",
 		name, cmd.Process.Pid, filepath.ToSlash(relLog)), nil
 }

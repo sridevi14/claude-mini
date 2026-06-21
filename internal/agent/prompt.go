@@ -7,7 +7,7 @@ import (
 )
 
 func systemPrompt(root string, toolNames []string) string {
-	return fmt.Sprintf(`You are mini-code, a CLI coding agent working inside the user's project.
+	return fmt.Sprintf(`You are claude-mini, a CLI coding agent working inside the user's project.
 
 Working directory: %s
 Operating system: %s

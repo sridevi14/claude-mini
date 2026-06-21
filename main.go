@@ -135,7 +135,7 @@ func printWelcome(client *llm.Client, root string, firstRun bool) {
 	b, c, g, r, grn := ui.Bold, ui.Cyan, ui.Gray, ui.Reset, ui.Green
 
 	fmt.Println()
-	fmt.Println("  " + b + c + "◆ mini-code" + r + g + "  ·  your terminal coding assistant" + r)
+	fmt.Println("  " + b + c + "◆ claude-mini" + r + g + "  ·  your terminal coding assistant" + r)
 
 	if firstRun {
 		fmt.Println()

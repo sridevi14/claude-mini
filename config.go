@@ -138,7 +138,7 @@ type fileConfig struct {
 }
 
 // configDir returns this tool's per-user config directory (created if needed),
-// e.g. %AppData%\mini-code on Windows or ~/.config/mini-code on Unix.
+// e.g. %AppData%\claude-mini on Windows or ~/.config/claude-mini on Unix.
 func configDir() (string, error) {
 	base, err := os.UserConfigDir()
 	if err != nil {
@@ -147,11 +147,31 @@ func configDir() (string, error) {
 			return "", err
 		}
 	}
-	dir := filepath.Join(base, "mini-code")
+	dir := filepath.Join(base, "claude-mini")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", err
 	}
+	migrateLegacyDir(base, dir)
 	return dir, nil
+}
+
+// migrateLegacyDir performs a one-time copy of saved settings from the old
+// "mini-code" directory into the current "claude-mini" one, so users who set a key
+// before the rename don't have to re-enter it. It's a no-op once the new dir is set
+// up or if there's nothing to migrate.
+func migrateLegacyDir(base, newDir string) {
+	if _, err := os.Stat(filepath.Join(newDir, "config.json")); err == nil {
+		return // already configured under the new name
+	}
+	old := filepath.Join(base, "mini-code")
+	if old == newDir {
+		return
+	}
+	for _, name := range []string{"config.json", "credentials"} {
+		if b, err := os.ReadFile(filepath.Join(old, name)); err == nil {
+			_ = os.WriteFile(filepath.Join(newDir, name), b, 0o600)
+		}
+	}
 }
 
 func configPath() (string, error) {

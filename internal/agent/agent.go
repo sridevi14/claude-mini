@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync/atomic"
+	"time"
 
 	"github.com/sridevi14/claude-mini/internal/llm"
 	"github.com/sridevi14/claude-mini/internal/session"
@@ -124,12 +126,33 @@ func (a *Agent) Resume(records []session.Record) int {
 func (a *Agent) Run(ctx context.Context, userInput string) {
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	started := time.Now()
 
 	a.history = append(a.history, llm.Message{Role: "user", Content: userInput})
 	a.sess.Log("user", userInput)
 
 	for {
 		stream := &ui.Streamer{}
+		interactive := ui.Interactive()
+
+		// While the model works, show a live status line: an animated glyph, elapsed
+		// time, a running token estimate and the interrupt hint. To keep that line
+		// from fighting with the model's output, in interactive mode we don't echo
+		// tokens as they stream — we only count them — and print the finished answer
+		// once the call returns. Piped/CI runs keep the plain live-streaming behavior.
+		var liveOut int64
+		onReasoning, onContent := stream.Reasoning, stream.Content
+		var sp *ui.Spinner
+		if interactive {
+			base := a.cost.PromptTokens + a.cost.CompletionTokens
+			sp = ui.NewSpinner(pickWorkingVerb(), func() int {
+				return base + int(atomic.LoadInt64(&liveOut))/4 // ~4 chars per token
+			})
+			count := func(s string) { atomic.AddInt64(&liveOut, int64(len([]rune(s)))) }
+			onReasoning, onContent = count, count
+			sp.Start()
+		}
+
 		// Listen for an interrupt only while streaming — stdin is otherwise needed
 		// by permission/ask prompts in the tool phase.
 		var release func()
@@ -137,14 +160,26 @@ func (a *Agent) Run(ctx context.Context, userInput string) {
 			release = a.watch(cancel)
 		}
 		msg, usage, err := a.client.Stream(runCtx, a.history, a.tools.Defs(), llm.StreamHandler{
-			OnReasoning: stream.Reasoning,
-			OnContent:   stream.Content,
-			OnRetry: func(attempt int, err error) {
-				ui.Errorf("connection issue (%v) — retrying (attempt %d)…", err, attempt)
+			OnReasoning: onReasoning,
+			OnContent:   onContent,
+			OnRetry: func(attempt int, e error) {
+				if sp != nil {
+					sp.Stop()
+					sp = nil
+				}
+				ui.Errorf("connection issue (%v) — retrying (attempt %d)…", e, attempt)
 			},
 		})
 		if release != nil {
 			release()
+		}
+		if sp != nil {
+			sp.Stop()
+		}
+		// In interactive mode the answer was buffered while the status line ran;
+		// render it now that the line is cleared.
+		if interactive && err == nil && strings.TrimSpace(msg.Content) != "" {
+			stream.Content(msg.Content)
 		}
 		stream.End()
 		if err != nil {
@@ -161,6 +196,7 @@ func (a *Agent) Run(ctx context.Context, userInput string) {
 		a.sess.Log("assistant", msg)
 
 		if len(msg.ToolCalls) == 0 {
+			fmt.Println(doneLine(time.Since(started)))
 			fmt.Println(a.cost.Line())
 			a.maybeCompact(runCtx, usage.PromptTokens)
 			return
