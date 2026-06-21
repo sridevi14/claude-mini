@@ -1,4 +1,4 @@
-module minicode
+module github.com/sridevi14/claude-mini
 
 go 1.22
 

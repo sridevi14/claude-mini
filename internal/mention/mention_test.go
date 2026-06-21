@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"minicode/internal/ignore"
+	"github.com/sridevi14/claude-mini/internal/ignore"
 )
 
 // buildTree creates a small project layout under a temp dir and returns a Resolver.

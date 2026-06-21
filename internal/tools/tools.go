@@ -8,9 +8,9 @@ import (
 	"sort"
 	"strings"
 
-	"minicode/internal/ignore"
-	"minicode/internal/llm"
-	"minicode/internal/session"
+	"github.com/sridevi14/claude-mini/internal/ignore"
+	"github.com/sridevi14/claude-mini/internal/llm"
+	"github.com/sridevi14/claude-mini/internal/session"
 )
 
 // Tool is a single capability the agent can invoke.

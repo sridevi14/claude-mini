@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"minicode/internal/llm"
-	"minicode/internal/ui"
+	"github.com/sridevi14/claude-mini/internal/llm"
+	"github.com/sridevi14/claude-mini/internal/ui"
 )
 
 // --- write_file ---

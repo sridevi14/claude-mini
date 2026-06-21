@@ -9,7 +9,7 @@ import (
 	"regexp"
 	"strings"
 
-	"minicode/internal/llm"
+	"github.com/sridevi14/claude-mini/internal/llm"
 )
 
 type search struct{ r *Registry }

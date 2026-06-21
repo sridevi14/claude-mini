@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"strings"
 
-	"minicode/internal/llm"
-	"minicode/internal/session"
-	"minicode/internal/tools"
-	"minicode/internal/ui"
+	"github.com/sridevi14/claude-mini/internal/llm"
+	"github.com/sridevi14/claude-mini/internal/session"
+	"github.com/sridevi14/claude-mini/internal/tools"
+	"github.com/sridevi14/claude-mini/internal/ui"
 )
 
 // Agent drives the multi-turn conversation + tool loop.

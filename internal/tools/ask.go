@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"minicode/internal/llm"
-	"minicode/internal/ui"
+	"github.com/sridevi14/claude-mini/internal/llm"
+	"github.com/sridevi14/claude-mini/internal/ui"
 )
 
 // askUser lets the model pause and ask the user a clarifying question instead of

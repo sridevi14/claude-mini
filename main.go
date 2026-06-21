@@ -10,13 +10,13 @@ import (
 
 	"github.com/eiannone/keyboard"
 
-	"minicode/internal/agent"
-	"minicode/internal/ignore"
-	"minicode/internal/llm"
-	"minicode/internal/mention"
-	"minicode/internal/session"
-	"minicode/internal/tools"
-	"minicode/internal/ui"
+	"github.com/sridevi14/claude-mini/internal/agent"
+	"github.com/sridevi14/claude-mini/internal/ignore"
+	"github.com/sridevi14/claude-mini/internal/llm"
+	"github.com/sridevi14/claude-mini/internal/mention"
+	"github.com/sridevi14/claude-mini/internal/session"
+	"github.com/sridevi14/claude-mini/internal/tools"
+	"github.com/sridevi14/claude-mini/internal/ui"
 )
 
 const (

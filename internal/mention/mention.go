@@ -15,15 +15,15 @@ import (
 	"strconv"
 	"strings"
 
-	"minicode/internal/ignore"
-	"minicode/internal/ui"
+	"github.com/sridevi14/claude-mini/internal/ignore"
+	"github.com/sridevi14/claude-mini/internal/ui"
 )
 
 const (
 	maxFileBytes  = 50_000 // cap per attached file to bound token usage
-	maxCandidates = 8       // how many options to show when a mention is ambiguous
-	maxScan       = 5000    // safety cap on files walked
-	maxSuggest    = 12      // how many live dropdown suggestions to surface
+	maxCandidates = 8      // how many options to show when a mention is ambiguous
+	maxScan       = 5000   // safety cap on files walked
+	maxSuggest    = 12     // how many live dropdown suggestions to surface
 )
 
 // Matches returns up to maxSuggest project paths matching the partial @token
