@@ -1,0 +1,33 @@
+name: release
+
+# Runs only when you push a version tag (e.g. v1.0.0), not on every commit.
+# Cut a release with:
+#   git tag v1.0.0
+#   git push origin v1.0.0
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write          # needed to create the GitHub Release
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod   # stay in sync with the module's Go version
+
+      # CGO is disabled, so one Linux runner cross-compiles all six binaries.
+      - name: Build release binaries
+        run: sh build.sh
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true

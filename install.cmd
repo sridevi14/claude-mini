@@ -7,8 +7,14 @@ rem ============================================================
 setlocal enableextensions
 
 set "REPO=sridevi14/claude-mini"
-set "ASSET=claude-mini.exe"
 set "INSTALL_DIR=%USERPROFILE%\bin"
+rem The binary is saved under this fixed name so the command is simply "claude-mini".
+set "BIN=%INSTALL_DIR%\claude-mini.exe"
+
+rem Pick the right release asset for this machine's CPU architecture.
+set "ARCH=amd64"
+if /i "%PROCESSOR_ARCHITECTURE%"=="ARM64" set "ARCH=arm64"
+set "ASSET=claude-mini-windows-%ARCH%.exe"
 set "URL=https://github.com/%REPO%/releases/latest/download/%ASSET%"
 
 echo.
@@ -28,9 +34,9 @@ rem --- 2. Download the latest release binary -----------------
 echo Downloading %ASSET% from the latest release...
 where curl >nul 2>nul
 if %errorlevel%==0 (
-    curl -L --fail -o "%INSTALL_DIR%\%ASSET%" "%URL%"
+    curl -L --fail -o "%BIN%" "%URL%"
 ) else (
-    powershell -NoProfile -Command "try { Invoke-WebRequest -Uri '%URL%' -OutFile '%INSTALL_DIR%\%ASSET%' -UseBasicParsing } catch { exit 1 }"
+    powershell -NoProfile -Command "try { Invoke-WebRequest -Uri '%URL%' -OutFile '%BIN%' -UseBasicParsing } catch { exit 1 }"
 )
 if errorlevel 1 (
     echo.
@@ -48,7 +54,7 @@ powershell -NoProfile -Command "$d='%INSTALL_DIR%'; $p=[Environment]::GetEnviron
 echo.
 echo ============================================================
 echo  claude-mini was installed to:
-echo      %INSTALL_DIR%\%ASSET%
+echo      %BIN%
 echo.
 echo  Close this window and open a NEW Command Prompt, then run:
 echo.

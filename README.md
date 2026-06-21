@@ -9,32 +9,41 @@ crashing.
 It talks to an **OpenAI-compatible** chat completions API using OpenAI-style
 tool/function calling.
 
-## Install (Windows)
+## Install
 
-Open **Command Prompt (CMD)** and paste this one line:
+After installing, open a **new** terminal and run `claude-mini` from any directory.
+On first run it asks for your OpenAdapter API key (input hidden) and saves it to
+your user config dir, so you only enter it once. Use `/login` to change it later.
+Re-run the installer any time to update to the latest release.
+
+### Windows (CMD)
+
+Paste this one line into **Command Prompt**:
 
 ```bat
 curl -L -o "%TEMP%\claude-mini-install.cmd" https://raw.githubusercontent.com/sridevi14/claude-mini/main/install.cmd && "%TEMP%\claude-mini-install.cmd"
 ```
 
-This downloads and runs [`install.cmd`](install.cmd), which:
+[`install.cmd`](install.cmd) downloads the right `claude-mini-windows-<arch>.exe`
+into `%USERPROFILE%\bin` (as `claude-mini.exe`), creates that folder if needed,
+and adds it to your user `PATH`. Then **close CMD, open a new one**, and run
+`claude-mini`.
 
-1. downloads the latest `claude-mini.exe` from GitHub Releases into `%USERPROFILE%\bin`,
-2. creates that folder if needed,
-3. adds it to your user `PATH` permanently.
+### macOS / Linux
 
-**Close CMD and open a new one**, then run it from any directory:
+Paste this one line into your terminal:
 
-```bat
-claude-mini
+```sh
+curl -fsSL https://raw.githubusercontent.com/sridevi14/claude-mini/main/install.sh | sh
 ```
 
-On first run it asks for your OpenAdapter API key (input hidden) and saves it to
-`%AppData%\mini-code\credentials`, so you only enter it once. Use `/login` to
-change it later.
+[`install.sh`](install.sh) detects your OS/arch, downloads the matching
+`claude-mini-<os>-<arch>` binary into `~/.local/bin`, marks it executable, and
+adds that folder to your `PATH` (via `~/.profile`/`~/.bashrc`/`~/.zshrc`) if it
+isn't already. Open a new terminal (or `source ~/.profile`) and run `claude-mini`.
 
-To **update**, just run the same one-line command again — it overwrites the
-binary with the latest release.
+> Override the install location with `CLAUDE_MINI_INSTALL_DIR`, e.g.
+> `curl -fsSL …/install.sh | CLAUDE_MINI_INSTALL_DIR=/usr/local/bin sh`.
 
 ## Build from source
 
@@ -48,6 +57,43 @@ go build -o claude-mini .
 - The API key is prompted on first run (or set `OPENADAPTER_API_KEY=sk-...` for
   scripted/CI use).
 - Optional cost overrides (USD per 1M tokens): `MINI_PRICE_IN`, `MINI_PRICE_OUT`
+
+## Releasing (maintainers)
+
+Binaries are pure-Go (`CGO_ENABLED=0`), so one machine cross-compiles every
+platform into `./dist`, with the exact names the installers expect:
+
+```
+claude-mini-linux-amd64     claude-mini-darwin-amd64    claude-mini-windows-amd64.exe
+claude-mini-linux-arm64     claude-mini-darwin-arm64    claude-mini-windows-arm64.exe
+```
+
+### Automated (recommended)
+
+A GitHub Action ([`.github/workflows/release.yml`](.github/workflows/release.yml))
+builds all six binaries and publishes them as a Release whenever you push a
+**version tag**:
+
+```sh
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+It runs `build.sh` on a single Linux runner and uploads `dist/*`. Day-to-day
+pushes to `main` don't trigger a release — only tags do. The installers fetch
+from `releases/latest/download/<asset>`, so a new tag instantly becomes what
+users get.
+
+### Manual (fallback)
+
+Build locally and upload every file in `./dist` to a Release yourself:
+
+```sh
+sh build.sh                                          # macOS / Linux / Git Bash
+```
+```powershell
+powershell -ExecutionPolicy Bypass -File build.ps1   # Windows
+```
 
 ## How it works
 

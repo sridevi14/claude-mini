@@ -5,6 +5,8 @@
 # build artifacts
 mini.exe
 *.exe
+claude-mini
+dist/
 
 # runtime state (logs, transcripts, server output)
 .mini_agent/
