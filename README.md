@@ -9,16 +9,44 @@ crashing.
 It talks to an **OpenAI-compatible** chat completions API using OpenAI-style
 tool/function calling.
 
-## Setup
+## Install (Windows)
+
+Open **Command Prompt (CMD)** and paste this one line:
+
+```bat
+curl -L -o "%TEMP%\claude-mini-install.cmd" https://raw.githubusercontent.com/sridevi14/claude-mini/main/install.cmd && "%TEMP%\claude-mini-install.cmd"
+```
+
+This downloads and runs [`install.cmd`](install.cmd), which:
+
+1. downloads the latest `claude-mini.exe` from GitHub Releases into `%USERPROFILE%\bin`,
+2. creates that folder if needed,
+3. adds it to your user `PATH` permanently.
+
+**Close CMD and open a new one**, then run it from any directory:
+
+```bat
+claude-mini
+```
+
+On first run it asks for your OpenAdapter API key (input hidden) and saves it to
+`%AppData%\mini-code\credentials`, so you only enter it once. Use `/login` to
+change it later.
+
+To **update**, just run the same one-line command again — it overwrites the
+binary with the latest release.
+
+## Build from source
 
 ```sh
-export OPENADAPTER_API_KEY=sk-...      # required
-go build -o mini .
-./mini                                  # run inside the project you want to work on
+go build -o claude-mini .
+./claude-mini                           # run inside the project you want to work on
 ```
 
 - Base URL: `https://api.openadapter.in/v1`
-- Model: `glm-4.5`
+- Model: `deepseek-v3`
+- The API key is prompted on first run (or set `OPENADAPTER_API_KEY=sk-...` for
+  scripted/CI use).
 - Optional cost overrides (USD per 1M tokens): `MINI_PRICE_IN`, `MINI_PRICE_OUT`
 
 ## How it works

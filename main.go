@@ -156,6 +156,7 @@ func handleCommand(cmd string, sess *session.Session, reg *tools.Registry, cost 
 		ui.Info("  /undo    revert the last file write")
 		ui.Info("  /cost    show token usage and estimated cost")
 		ui.Info("  /tools   list available tools")
+		ui.Info("  /getkey    get apikey")
 		ui.Info("  /exit    quit")
 		ui.Info("type @ to pick a file from the live dropdown and attach its contents.")
 		ui.Info("shortcut: press Esc while the agent is working to pause, then type more instructions to continue.")
@@ -209,6 +210,11 @@ func handleCommand(cmd string, sess *session.Session, reg *tools.Registry, cost 
 		for _, n := range reg.Names() {
 			ui.Info("  • %s", n)
 		}
+	case "/getkey":
+		ui.Info("ApiKey:")
+		apiKey := resolveAPIKey()
+		fmt.Println(apiKey, "apiKey")
+
 	default:
 		ui.Errorf("unknown command %q (try /help)", cmd)
 	}
