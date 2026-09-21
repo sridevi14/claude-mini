@@ -16,11 +16,17 @@ type diffOp struct {
 }
 
 // Diff renders a colored, context-collapsed line diff between old and new text.
-func Diff(oldText, newText string) string {
+func Diff(oldText, newText string) string { return diff(oldText, newText, true) }
+
+// DiffPlain renders the same diff without ANSI colors. Tool results are handed to
+// the model, and escape codes there are tokens it pays for and cannot use.
+func DiffPlain(oldText, newText string) string { return diff(oldText, newText, false) }
+
+func diff(oldText, newText string, color bool) string {
 	a := splitLines(oldText)
 	b := splitLines(newText)
 	ops := lcsDiff(a, b)
-	return render(ops)
+	return render(ops, color)
 }
 
 func splitLines(s string) []string {
@@ -73,9 +79,15 @@ func lcsDiff(a, b []string) []diffOp {
 	return ops
 }
 
-// render collapses long runs of unchanged context to keep diffs readable.
-func render(ops []diffOp) string {
+// render collapses long runs of unchanged context to keep diffs readable. When
+// color is false the markers alone carry the meaning, so the output stays legible
+// in a tool result.
+func render(ops []diffOp, color bool) string {
 	const ctx = 3
+	red, green, gray, reset := Red, Green, Gray, Reset
+	if !color {
+		red, green, gray, reset = "", "", "", ""
+	}
 	// mark which equal lines are near a change and should be shown.
 	show := make([]bool, len(ops))
 	for i, op := range ops {
@@ -92,7 +104,7 @@ func render(ops []diffOp) string {
 	for i, op := range ops {
 		if op.kind == diffEqual && !show[i] {
 			if !skipping {
-				sb.WriteString(Gray + "  ⋮" + Reset + "\n")
+				sb.WriteString(gray + "  ⋮" + reset + "\n")
 				skipping = true
 			}
 			continue
@@ -100,11 +112,11 @@ func render(ops []diffOp) string {
 		skipping = false
 		switch op.kind {
 		case diffEqual:
-			sb.WriteString(Gray + "  " + op.text + Reset + "\n")
+			sb.WriteString(gray + "  " + op.text + reset + "\n")
 		case diffDel:
-			sb.WriteString(Red + "- " + op.text + Reset + "\n")
+			sb.WriteString(red + "- " + op.text + reset + "\n")
 		case diffAdd:
-			sb.WriteString(Green + "+ " + op.text + Reset + "\n")
+			sb.WriteString(green + "+ " + op.text + reset + "\n")
 		}
 	}
 	return sb.String()

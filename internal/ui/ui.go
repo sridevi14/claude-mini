@@ -197,6 +197,73 @@ func ToolResult(text string) {
 	}
 }
 
+// compactPreviewLines is how many lines of a tool's output are echoed to the
+// terminal. The model and the session transcript still get the whole result -
+// the terminal only needs enough to show what the tool did, so reading a file
+// no longer dumps the file into the scrollback.
+const compactPreviewLines = 2
+
+// ToolOutput prints a short, dimmed preview of what a tool returned.
+func ToolOutput(text string) {
+	trimmed := strings.TrimRight(text, "\n")
+	if strings.TrimSpace(trimmed) == "" {
+		fmt.Println(Gray + "  │ (no output)" + Reset)
+		return
+	}
+	lines := strings.Split(trimmed, "\n")
+	shown := lines
+	if len(shown) > compactPreviewLines {
+		shown = shown[:compactPreviewLines]
+	}
+	width := outputWidth()
+	for _, ln := range shown {
+		fmt.Println(Gray + "  │ " + Dim + clip(ln, width) + Reset)
+	}
+	if rest := len(lines) - len(shown); rest > 0 {
+		fmt.Printf("%s  │ … +%d more %s (%s) sent to the model%s\n",
+			Gray, rest, plural(rest, "line"), humanSize(len(text)), Reset)
+	}
+}
+
+// clip shortens a single display line to the terminal width, counting runes so
+// multi-byte characters are not cut in half.
+func clip(s string, width int) string {
+	s = strings.ReplaceAll(s, "\t", "    ")
+	r := []rune(s)
+	if width <= 1 || len(r) <= width {
+		return s
+	}
+	return string(r[:width-1]) + "…"
+}
+
+// outputWidth is the usable width for a previewed line, leaving room for the
+// "  │ " gutter. It falls back to a sane default off a terminal.
+func outputWidth() int {
+	w, _, err := term.GetSize(int(os.Stdout.Fd()))
+	if err != nil || w < 20 {
+		return 100
+	}
+	return w - 6
+}
+
+func plural(n int, word string) string {
+	if n == 1 {
+		return word
+	}
+	return word + "s"
+}
+
+func humanSize(n int) string {
+	switch {
+	case n >= 1<<20:
+		return fmt.Sprintf("%.1f MB", float64(n)/(1<<20))
+	case n >= 1<<10:
+		return fmt.Sprintf("%.1f KB", float64(n)/(1<<10))
+	default:
+		return strconv.Itoa(n) + " B"
+	}
+}
+
 // Perm is the outcome of a permission prompt.
 type Perm int
 

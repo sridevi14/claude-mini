@@ -2,6 +2,8 @@ package agent
 
 import (
 	"context"
+	"os"
+	"strconv"
 	"strings"
 
 	"github.com/sridevi14/claude-mini/internal/llm"
@@ -11,7 +13,19 @@ import (
 const (
 	// compactTriggerTokens: once the measured prompt size for a turn crosses
 	// this, fold older history into a summary before the next turn.
+	//
+	// This is a cost/context tradeoff, and prompt caching changes the arithmetic.
+	// History is only ever appended to, and the system prompt and tool schemas are
+	// byte-stable, so the request prefix stays identical from turn to turn — which
+	// is exactly what a provider's prompt cache keys on, and why re-sending a long
+	// history can cost a small fraction of its face value. Compaction rewrites the
+	// prefix and invalidates that cache, so compacting early is actively expensive
+	// on a caching provider. Raise CLAUDE_MINI_COMPACT_AT when the model's context
+	// window has room to spare; lower it for a small-context model.
 	compactTriggerTokens = 60000
+
+	// envCompactAt overrides compactTriggerTokens.
+	envCompactAt = "CLAUDE_MINI_COMPACT_AT"
 	// compactKeepUserTurns: how many of the most recent user turns to keep
 	// verbatim (cutting on a user boundary never splits a tool-call/result pair).
 	compactKeepUserTurns = 2
@@ -20,6 +34,19 @@ const (
 	// turn. The full result is still logged to the transcript.
 	maxToolResultInHistory = 24000
 )
+
+// compactAt returns the prompt-token size at which history is folded into a
+// summary, honoring the CLAUDE_MINI_COMPACT_AT override. A non-positive or
+// unparseable value falls back to the built-in default rather than disabling
+// compaction, which would eventually hard-fail against the context window.
+func compactAt() int {
+	if v := strings.TrimSpace(os.Getenv(envCompactAt)); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return n
+		}
+	}
+	return compactTriggerTokens
+}
 
 // clampForHistory bounds one tool result kept in the conversation context.
 func clampForHistory(s string) string {
@@ -34,7 +61,7 @@ func clampForHistory(s string) string {
 // context size crosses the trigger, preserving the system prompt and the most
 // recent turns. It is best-effort: any failure leaves history unchanged.
 func (a *Agent) maybeCompact(ctx context.Context, lastPromptTokens int) {
-	if lastPromptTokens < compactTriggerTokens || len(a.history) < 6 {
+	if lastPromptTokens < compactAt() || len(a.history) < 6 {
 		return
 	}
 	cut := a.compactionCut()

@@ -11,7 +11,8 @@ import (
 
 // Cost accumulates token usage and estimates spend.
 type Cost struct {
-	PromptTokens     int
+	PromptTokens     int // billed at the full input rate
+	CachedTokens     int // served from a cached prefix, at roughly a tenth of it
 	CompletionTokens int
 	Turns            int
 
@@ -37,19 +38,33 @@ func NewCost() *Cost {
 
 // Add folds in one completion's usage.
 func (c *Cost) Add(u llm.Usage) {
-	c.PromptTokens += u.PromptTokens
+	c.PromptTokens += u.Uncached()
+	c.CachedTokens += u.CachedTokens()
 	c.CompletionTokens += u.CompletionTokens
 	c.Turns++
 }
 
+// cacheReadRate is what a cached prompt prefix costs relative to a fresh one.
+const cacheReadRate = 0.1
+
 // USD returns the estimated total cost so far.
 func (c *Cost) USD() float64 {
-	return float64(c.PromptTokens)/1e6*c.priceIn + float64(c.CompletionTokens)/1e6*c.priceOut
+	return float64(c.PromptTokens)/1e6*c.priceIn +
+		float64(c.CachedTokens)/1e6*c.priceIn*cacheReadRate +
+		float64(c.CompletionTokens)/1e6*c.priceOut
 }
 
 // Line renders a one-line usage footer with a token breakdown and estimated cost.
 func (c *Cost) Line() string {
-	total := c.PromptTokens + c.CompletionTokens
-	return fmt.Sprintf("%s  ↑ %s in · ↓ %s out · %s total · ~$%.4f (est.)%s",
-		ui.Gray, kfmt(c.PromptTokens), kfmt(c.CompletionTokens), kfmt(total), c.USD(), ui.Reset)
+	in := c.PromptTokens + c.CachedTokens
+	total := in + c.CompletionTokens
+	// The cached figure is the only ground truth that caching is working. Its
+	// absence is the diagnostic: no figure means the endpoint reported no cache
+	// hit, whatever the request asked for.
+	cached := ""
+	if c.CachedTokens > 0 {
+		cached = fmt.Sprintf(" (%s cached, %.0f%%)", kfmt(c.CachedTokens), 100*float64(c.CachedTokens)/float64(in))
+	}
+	return fmt.Sprintf("%s  ↑ %s in%s · ↓ %s out · %s total · ~$%.4f (est.)%s",
+		ui.Gray, kfmt(in), cached, kfmt(c.CompletionTokens), kfmt(total), c.USD(), ui.Reset)
 }

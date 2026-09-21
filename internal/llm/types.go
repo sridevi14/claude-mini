@@ -36,8 +36,41 @@ type ToolFunction struct {
 }
 
 // Usage reports token counts for a completion.
+//
+// Endpoints disagree on how they report a cached prompt prefix. OpenAI-compatible
+// servers nest it under prompt_tokens_details and count it inside prompt_tokens;
+// endpoints that pass an Anthropic response through report cache_read_input_tokens
+// and leave it out of the prompt total. Both are parsed, and the two accessors
+// below paper over the difference so callers never have to care which arrived.
 type Usage struct {
 	PromptTokens     int `json:"prompt_tokens"`
 	CompletionTokens int `json:"completion_tokens"`
 	TotalTokens      int `json:"total_tokens"`
+
+	PromptTokensDetails struct {
+		CachedTokens int `json:"cached_tokens"`
+	} `json:"prompt_tokens_details"`
+	CacheReadInputTokens     int `json:"cache_read_input_tokens"`
+	CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
+}
+
+// CachedTokens reports how much of this request's prompt was served from cache.
+func (u Usage) CachedTokens() int {
+	if u.CacheReadInputTokens > 0 {
+		return u.CacheReadInputTokens
+	}
+	return u.PromptTokensDetails.CachedTokens
+}
+
+// Uncached returns the prompt tokens billed at the full input rate. Under the
+// OpenAI convention the cached prefix is included in PromptTokens and has to be
+// subtracted; under the Anthropic one it was never counted there to begin with.
+func (u Usage) Uncached() int {
+	if u.CacheReadInputTokens > 0 || u.CacheCreationInputTokens > 0 {
+		return u.PromptTokens
+	}
+	if n := u.PromptTokensDetails.CachedTokens; n > 0 && n <= u.PromptTokens {
+		return u.PromptTokens - n
+	}
+	return u.PromptTokens
 }

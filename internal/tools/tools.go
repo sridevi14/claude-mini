@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/sridevi14/claude-mini/internal/ignore"
@@ -130,6 +131,34 @@ func obj(props map[string]any, required ...string) map[string]any {
 }
 
 func str(desc string) map[string]any { return map[string]any{"type": "string", "description": desc} }
+
+// Read paging defaults: enough to see a whole file of ordinary size in one call,
+// bounded so a huge or minified file cannot flood the context.
+const (
+	defaultReadLines = 400
+	maxReadLineWidth = 2000
+)
+
+func integer(desc string) map[string]any {
+	return map[string]any{"type": "integer", "description": desc}
+}
+
+// getInt reads a numeric argument. JSON numbers decode as float64, and some
+// models send them as strings, so both are accepted.
+func getInt(args map[string]any, key string, def int) int {
+	switch v := args[key].(type) {
+	case float64:
+		return int(v)
+	case int:
+		return v
+	case string:
+		if n, err := strconv.Atoi(strings.TrimSpace(v)); err == nil {
+			return n
+		}
+	}
+	return def
+}
+
 func boolean(desc string) map[string]any {
 	return map[string]any{"type": "boolean", "description": desc}
 }
@@ -166,9 +195,16 @@ type readFile struct{ r *Registry }
 
 func (t *readFile) Def() llm.Tool {
 	return llm.Tool{Type: "function", Function: llm.ToolFunction{
-		Name:        "read_file",
-		Description: "Read the contents of a text file, relative to the working directory.",
-		Parameters:  obj(map[string]any{"path": str("file path to read")}, "path"),
+		Name: "read_file",
+		Description: "Read a text file, relative to the working directory. Output is line-numbered " +
+			"(the numbers are display only - never copy them into edit_file strings). Long files come " +
+			"back one page at a time: pass offset (1-based first line) and limit (how many lines) to " +
+			"read just the part you need, for example the single function you located with search.",
+		Parameters: obj(map[string]any{
+			"path":   str("file path to read"),
+			"offset": integer("first line to read, 1-based (default 1)"),
+			"limit":  integer("how many lines to return (default 400)"),
+		}, "path"),
 	}}
 }
 func (t *readFile) Mutating() bool                         { return false }
@@ -178,18 +214,49 @@ func (t *readFile) Run(_ context.Context, args map[string]any) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	const max = 200_000
 	b, err := os.ReadFile(abs)
 	if err != nil {
 		return "", err
 	}
-	if len(b) > max {
-		return string(b[:max]) + "\n… (file truncated at 200KB)", nil
-	}
 	if len(b) == 0 {
 		return "(file is empty)", nil
 	}
-	return string(b), nil
+
+	lines := strings.Split(strings.ReplaceAll(string(b), "\r\n", "\n"), "\n")
+	// A trailing newline yields a final empty element that is not a real line.
+	if n := len(lines); n > 0 && lines[n-1] == "" {
+		lines = lines[:n-1]
+	}
+	total := len(lines)
+
+	offset := getInt(args, "offset", 1)
+	if offset < 1 {
+		offset = 1
+	}
+	if offset > total {
+		return fmt.Sprintf("offset %d is past the end of %s (%d lines)", offset, getStr(args, "path"), total), nil
+	}
+	limit := getInt(args, "limit", defaultReadLines)
+	if limit < 1 {
+		limit = defaultReadLines
+	}
+	last := offset - 1 + limit
+	if last > total {
+		last = total
+	}
+
+	var sb strings.Builder
+	for i := offset - 1; i < last; i++ {
+		ln := lines[i]
+		if len(ln) > maxReadLineWidth {
+			ln = ln[:maxReadLineWidth] + "… (line truncated)"
+		}
+		fmt.Fprintf(&sb, "%6d\t%s\n", i+1, ln)
+	}
+	if offset > 1 || last < total {
+		fmt.Fprintf(&sb, "… showing lines %d-%d of %d. Call read_file again with offset/limit for another section.\n", offset, last, total)
+	}
+	return sb.String(), nil
 }
 
 // --- list_dir ---
