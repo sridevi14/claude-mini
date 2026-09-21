@@ -1,0 +1,919 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>claude-mini — How It Actually Works</title>
+<style>
+  :root{
+    --bg:#0e1116; --bg-soft:#161b22; --bg-code:#0b0e13; --line:#262c36;
+    --fg:#e6edf3; --fg-dim:#9aa7b4; --fg-faint:#6e7b8a;
+    --accent:#7ee3c7; --accent2:#8ab4ff; --warn:#ffcf70; --danger:#ff8f8f;
+    --violet:#c39bff; --radius:10px;
+    --mono:ui-monospace,"SF Mono","Cascadia Code","JetBrains Mono",Consolas,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth; scroll-padding-top:20px}
+  body{
+    margin:0; background:var(--bg); color:var(--fg);
+    font-family:var(--sans); font-size:16px; line-height:1.7;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{display:flex; max-width:1400px; margin:0 auto}
+
+  nav{
+    width:272px; flex:0 0 272px; position:sticky; top:0; height:100vh;
+    overflow-y:auto; padding:28px 18px 60px; border-right:1px solid var(--line);
+    background:var(--bg-soft);
+  }
+  nav .brand{font-family:var(--mono); font-size:15px; color:var(--accent); font-weight:600; margin-bottom:4px}
+  nav .brandsub{font-size:12px; color:var(--fg-faint); margin-bottom:22px; line-height:1.5}
+  nav a{display:block; color:var(--fg-dim); text-decoration:none; font-size:13.5px;
+        padding:5px 10px; border-radius:6px; border-left:2px solid transparent}
+  nav a:hover{color:var(--fg); background:rgba(255,255,255,.04)}
+  nav .part{display:block; color:var(--fg-faint); font-size:11px; text-transform:uppercase;
+            letter-spacing:.08em; margin-top:18px; padding:0 10px 4px; font-weight:600}
+
+  main{flex:1; min-width:0; padding:44px 52px 140px; max-width:940px}
+  h1{font-size:34px; line-height:1.25; margin:0 0 8px; letter-spacing:-.02em}
+  .lede{color:var(--fg-dim); font-size:17px; margin:0 0 6px}
+  .meta{color:var(--fg-faint); font-size:13px; font-family:var(--mono); margin-bottom:38px}
+  h2{font-size:25px; margin:62px 0 6px; padding-top:16px; letter-spacing:-.015em; border-top:1px solid var(--line)}
+  h2 .num{color:var(--accent); font-family:var(--mono); font-size:16px; margin-right:10px; vertical-align:2px}
+  h3{font-size:18.5px; margin:34px 0 8px; color:var(--fg)}
+  h4{font-size:15px; margin:24px 0 6px; color:var(--accent2); font-family:var(--mono); font-weight:600}
+  p{margin:10px 0}
+  ul,ol{margin:10px 0; padding-left:22px}
+  li{margin:6px 0}
+  code{font-family:var(--mono); font-size:.88em; background:rgba(255,255,255,.07);
+       padding:2px 6px; border-radius:4px; color:var(--accent)}
+  pre{background:var(--bg-code); border:1px solid var(--line); border-radius:var(--radius);
+      padding:16px 18px; overflow-x:auto; font-family:var(--mono); font-size:13px;
+      line-height:1.65; margin:16px 0}
+  pre code{background:none; padding:0; color:var(--fg); font-size:13px}
+  .k{color:var(--accent2)} .s{color:var(--accent)} .cm{color:var(--fg-faint); font-style:italic}
+  .kw{color:var(--violet)} .n{color:var(--warn)}
+  a{color:var(--accent2)}
+  strong{color:#fff; font-weight:600}
+
+  .box{border:1px solid var(--line); border-left:3px solid var(--accent); background:var(--bg-soft);
+       border-radius:var(--radius); padding:14px 18px; margin:20px 0}
+  .box.warn{border-left-color:var(--warn)}
+  .box.term{border-left-color:var(--violet)}
+  .box .label{font-family:var(--mono); font-size:11px; text-transform:uppercase; letter-spacing:.09em;
+              color:var(--accent); margin-bottom:6px; font-weight:600}
+  .box.warn .label{color:var(--warn)} .box.term .label{color:var(--violet)}
+  .box p:first-of-type{margin-top:0} .box p:last-child{margin-bottom:0}
+
+  .diagram{background:var(--bg-code); border:1px solid var(--line); border-radius:var(--radius);
+           padding:20px; margin:22px 0; overflow-x:auto}
+  .diagram pre{background:none; border:none; margin:0; padding:0; font-size:12.5px; line-height:1.55; color:var(--fg-dim)}
+
+  table{width:100%; border-collapse:collapse; margin:18px 0; font-size:14.5px}
+  th{text-align:left; padding:9px 12px; border-bottom:2px solid var(--line); color:var(--fg-faint);
+     font-size:12px; text-transform:uppercase; letter-spacing:.06em; font-weight:600}
+  td{padding:9px 12px; border-bottom:1px solid var(--line); vertical-align:top}
+  tr:hover td{background:rgba(255,255,255,.02)}
+  td code{white-space:nowrap}
+
+  .file{font-family:var(--mono); font-size:12px; color:var(--fg-faint);
+        background:rgba(255,255,255,.04); border:1px solid var(--line);
+        border-radius:5px; padding:2px 8px; display:inline-block; margin:0 0 4px}
+
+  @media(max-width:1000px){
+    nav{display:none}
+    main{padding:28px 16px 100px}
+    h1{font-size:27px}
+    body{font-size:15px}
+  }
+  .pill{display:inline-block; font-family:var(--mono); font-size:11px; padding:1px 8px;
+        border-radius:20px; border:1px solid var(--line); color:var(--fg-dim)}
+  .pill.rw{border-color:#5a3a3a; color:var(--danger)}
+  .pill.ro{border-color:#2f4f45; color:var(--accent)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<nav>
+  <div class="brand">◆ claude-mini</div>
+  <div class="brandsub">The backend design, the agent loop, and the vocabulary of the AI world.</div>
+
+  <span class="part">Part I · Mental model</span>
+  <a href="#what-is-agent">1. What an "agent" really is</a>
+  <a href="#stateless">2. The model is stateless</a>
+  <a href="#lifecycle">3. Life of one request</a>
+
+  <span class="part">Part II · The moving parts</span>
+  <a href="#transport">4. The API call itself</a>
+  <a href="#streaming">5. Streaming &amp; SSE</a>
+  <a href="#sysprompt">6. The system prompt</a>
+  <a href="#tools">7. Tools / function calling</a>
+  <a href="#toolcatalog">8. Our tool catalog</a>
+  <a href="#permission">9. Human in the loop</a>
+
+  <span class="part">Part III · Keeping it alive</span>
+  <a href="#context">10. Context &amp; compaction</a>
+  <a href="#tokens">11. Tokens &amp; cost</a>
+  <a href="#persistence">12. Transcript, resume, undo</a>
+  <a href="#interrupt">13. Interrupts &amp; invariants</a>
+  <a href="#failure">14. Failure handling</a>
+  <a href="#provider">15. Provider abstraction</a>
+
+  <span class="part">Part IV · Reference</span>
+  <a href="#glossary">16. Full AI glossary</a>
+  <a href="#notbuilt">17. What we did NOT build</a>
+  <a href="#curriculum">18. The course behind this</a>
+</nav>
+
+<main>
+
+<h1>claude-mini: how the backend actually works</h1>
+<p class="lede">Not a file tour. This is the <em>design</em> — what an agent is, how the API call is shaped, what every AI term means, and where each idea lives in our system.</p>
+<p class="meta">~3,750 lines of Go · one HTTP endpoint · eight tools · zero frameworks</p>
+
+<div class="box">
+  <div class="label">Read this first</div>
+  <p>There is exactly <strong>one</strong> idea in this entire project. Everything else is plumbing around it:</p>
+  <p style="margin-top:10px"><strong>A language model cannot <em>do</em> anything. It can only produce text. So we let it produce text that <em>describes</em> an action, we perform that action ourselves on the real machine, we paste the outcome back into the conversation, and we ask it again. Loop until it stops asking.</strong></p>
+  <p style="margin-top:10px">That loop is the agent. Everything below is detail.</p>
+</div>
+
+
+<h2 id="what-is-agent"><span class="num">01</span>What an "agent" really is</h2>
+
+<p>In the AI world people use the word <strong>agent</strong> for something surprisingly small. It is not a neural network, not a service, not a personality. An agent is a <strong>control loop</strong> wrapped around a chat model.</p>
+
+<div class="diagram"><pre>
+         ┌─────────────────────────────────────────────────────┐
+         │                                                     │
+         │   1. send the WHOLE conversation to the model       │
+         │                       │                             │
+         │                       ▼                             │
+         │   2. model replies with EITHER                      │
+         │        (a) plain text   ───────────► stop, print it  │
+         │        (b) a tool call  ──┐                         │
+         │                           │                         │
+         │                           ▼                         │
+         │   3. WE execute that tool on the real computer      │
+         │                           │                         │
+         │                           ▼                         │
+         │   4. append the result to the conversation         │
+         │                           │                         │
+         └───────────────────────────┘
+                    (go back to step 1)
+</pre></div>
+
+<p>That is literally <code>Agent.Run()</code>. The <code>for { … }</code> loop in <span class="file">internal/agent/agent.go</span> <em>is</em> the agent. Delete the loop and you have a chatbot. Keep it and you have a coding assistant.</p>
+
+<div class="box term">
+  <div class="label">Terminology you should use</div>
+  <p><strong>Agentic loop</strong> / <strong>ReAct loop</strong> — the cycle above. "ReAct" = <em>Reason + Act</em>, from the 2022 paper that named the pattern: the model alternates between reasoning in text and taking actions in the world.</p>
+  <p><strong>Turn</strong> — one trip around the loop: one API call plus the tools it triggered. Our <code>Cost.Turns</code> counts these.</p>
+  <p><strong>Task</strong> — everything from the user pressing Enter until the model replies with no tool calls. One task = many turns.</p>
+  <p><strong>Harness</strong> / <strong>scaffold</strong> — the code around the model. That is our whole Go program. The industry phrase is: <em>the model is the engine, the harness is the car.</em></p>
+  <p><strong>Inner loop / outer loop</strong> — inner = tool-call iterations within one task; outer = the human typing the next task.</p>
+</div>
+
+<h3>Why the harness is the product</h3>
+<p>Two systems using the identical model behave wildly differently based on the harness. Ours decides:</p>
+<ul>
+  <li><strong>Which tools exist</strong> — the model can only do what we hand it.</li>
+  <li><strong>What goes back into context</strong> — we clamp tool results at 24 KB so one giant file doesn't poison every later turn.</li>
+  <li><strong>What needs a human</strong> — our permission gate.</li>
+  <li><strong>When to stop</strong> — no tool calls means done.</li>
+  <li><strong>What survives</strong> — compaction, transcripts, undo.</li>
+</ul>
+<p>Model quality sets the ceiling. Harness quality decides how close you get to it.</p>
+
+
+<h2 id="stateless"><span class="num">02</span>The model is stateless — this changes everything</h2>
+
+<p>The single most misunderstood fact about LLM backends: <strong>the model remembers nothing.</strong> There is no session on the server. Every HTTP request is a cold start.</p>
+
+<p>When you send turn #7 you are not sending "the next message". You are re-sending <em>turns 1 through 6 plus the new one</em>, every single time. The illusion of memory is created entirely by our client re-uploading history.</p>
+
+<div class="diagram"><pre>
+  Turn 1  POST →  [system, user]
+  Turn 2  POST →  [system, user, assistant, tool, user]
+  Turn 3  POST →  [system, user, assistant, tool, user, assistant, tool, user]
+                   └─────────────── re-sent in full, every time ──────────────┘
+</pre></div>
+
+<p>In our code that growing array is one struct field:</p>
+
+<pre><code><span class="kw">type</span> Agent <span class="kw">struct</span> {
+    history []llm.Message   <span class="cm">// ← THIS is "the memory". Nothing else is.</span>
+    …
+}</code></pre>
+
+<p>Three consequences fall out of this, and three parts of our design exist only to answer them:</p>
+
+<table>
+<tr><th>Consequence</th><th>Why it happens</th><th>Our answer</th></tr>
+<tr><td><strong>Cost grows quadratically</strong></td><td>Turn N re-bills every earlier token</td><td><code>Cost</code> tracker + result clamping</td></tr>
+<tr><td><strong>Context runs out</strong></td><td>Fixed token ceiling per model</td><td><code>maybeCompact()</code> at 60k</td></tr>
+<tr><td><strong>History must stay structurally valid</strong></td><td>API rejects a malformed message sequence</td><td>Interrupt + resume repair logic</td></tr>
+</table>
+
+<div class="box term">
+  <div class="label">Terminology</div>
+  <p><strong>Context window</strong> — the max tokens the model accepts in one request (system + history + new message + room for the reply). 128k / 200k / 1M depending on model.</p>
+  <p><strong>Stateless inference</strong> — the server keeps nothing between calls. <strong>Conversation state</strong> lives 100% on the client. That's us.</p>
+  <p><strong>Prompt caching</strong> — a provider optimization where an unchanged <em>prefix</em> of your messages is cached server-side so the re-send costs a fraction of face value. We now support this as an opt-in (<code>CLAUDE_MINI_CACHE=1</code>) — see §15.</p>
+</div>
+
+
+<h2 id="lifecycle"><span class="num">03</span>Life of one request, end to end</h2>
+
+<p>The user types <code>add a test for the add function and run it</code>. Here is the complete path through our backend.</p>
+
+<div class="diagram"><pre>
+ ┌─ TERMINAL ─────────────────────────────────────────────────────────┐
+ │  ui.ReadTask()        reads the line, live @-file autocomplete      │
+ │  mention.Expand()     "@main.go" → inlines that file's contents     │
+ └──────────────────────────────┬─────────────────────────────────────┘
+                                ▼
+ ┌─ AGENT  (agent.Run) ───────────────────────────────────────────────┐
+ │  history += {role:"user", content:"…"}                             │
+ │  sess.Log("user", …)                        ← JSONL transcript     │
+ │                                                                    │
+ │  ┌─ LOOP ────────────────────────────────────────────────────┐     │
+ │  │ spinner.Start()    "✻ Percolating… 12s · 4.1k tokens"     │     │
+ │  │ escWatcher()       Esc now cancels the context            │     │
+ │  │                                                           │     │
+ │  │ client.Stream(ctx, history, tools.Defs(), handlers) ───────┼─────┼──► HTTPS POST
+ │  │                                                           │     │    /chat/completions
+ │  │ ◄───────────── Server-Sent Events, chunk by chunk ─────────┼─────┼──◄ text/event-stream
+ │  │                                                           │     │
+ │  │ assembled = {content:"…", tool_calls:[…]} + usage{…}      │     │
+ │  │ cost.Add(usage);  history += assembled;  sess.Log(…)      │     │
+ │  │                                                           │     │
+ │  │ if len(tool_calls) == 0  ──► print "✓ done" · EXIT LOOP   │     │
+ │  │                                                           │     │
+ │  │ for each tool_call:                                       │     │
+ │  │    json.Unmarshal(arguments)      ← model sends a STRING  │     │
+ │  │    if tool.Mutating():                                    │     │
+ │  │        preview := tool.Preview()  ← colored diff          │     │
+ │  │        ui.AskPermission(…)        ← y / n / always        │     │
+ │  │    result := tool.Run(ctx, args)  ← REAL side effects     │     │
+ │  │    history += {role:"tool", tool_call_id:…, content:…}    │     │
+ │  │                                                           │     │
+ │  │ maybeCompact(promptTokens)                                │     │
+ │  └───────────────── back to the top of the loop ─────────────┘     │
+ └────────────────────────────────────────────────────────────────────┘
+</pre></div>
+
+<p>Notice what is <em>not</em> in that diagram: no database, no vector store, no message queue, no orchestration framework. A loop, an HTTP client, and a map of function pointers.</p>
+
+
+<h2 id="transport"><span class="num">04</span>The API call itself</h2>
+
+<p><span class="file">internal/llm/client.go</span></p>
+
+<p>We speak the <strong>OpenAI Chat Completions</strong> protocol. This matters enormously: it is the de-facto standard, so the same client code reaches OpenAI, OpenRouter, DeepSeek, Groq, Together, vLLM, LM Studio and a local Ollama. We wrote one client and got every provider.</p>
+
+<h4>The request body</h4>
+<pre><code>POST {baseURL}/chat/completions
+Authorization: Bearer {apiKey}
+Content-Type: application/json
+Accept: text/event-stream
+
+{
+  <span class="k">"model"</span>:       <span class="s">"deepseek-v3"</span>,
+  <span class="k">"messages"</span>:    [ …the entire history… ],
+  <span class="k">"tools"</span>:       [ …8 JSON-Schema tool definitions… ],
+  <span class="k">"tool_choice"</span>: <span class="s">"auto"</span>,
+  <span class="k">"stream"</span>:      <span class="kw">true</span>,
+  <span class="k">"stream_options"</span>: { <span class="k">"include_usage"</span>: <span class="kw">true</span> },
+  <span class="k">"temperature"</span>: <span class="n">0.3</span>
+}</code></pre>
+
+<h4>The four message roles</h4>
+<p>Every entry in <code>messages</code> has a <code>role</code>. There are exactly four, and each means something precise:</p>
+
+<table>
+<tr><th>Role</th><th>Who writes it</th><th>Purpose</th></tr>
+<tr><td><code>system</code></td><td>Us, once at startup</td><td>Standing instructions. Highest authority. Index 0, never removed.</td></tr>
+<tr><td><code>user</code></td><td>The human</td><td>The task, plus any <code>@file</code> attachments we inlined.</td></tr>
+<tr><td><code>assistant</code></td><td>The model</td><td>Its prose reply <em>and/or</em> its <code>tool_calls</code>.</td></tr>
+<tr><td><code>tool</code></td><td>Us, after running a tool</td><td>The tool's output, tagged with <code>tool_call_id</code> so the model knows which request it answers.</td></tr>
+</table>
+
+<div class="box warn">
+  <div class="label">The invariant that will bite you</div>
+  <p>Every <code>tool_call</code> in an assistant message <strong>must</strong> be followed by a matching <code>tool</code> message with the same <code>tool_call_id</code>. If even one is missing, the API rejects the <em>entire</em> next request with a 400 — forever, because the bad history gets re-sent every turn.</p>
+  <p>This one rule is why our interrupt handler still emits <code>"[interrupted by user before this tool ran]"</code> for tools that never executed, and why <code>Resume()</code> drops a dangling final assistant turn. Both exist purely to protect this invariant.</p>
+</div>
+
+<h4>Temperature</h4>
+<p>We hardcode <code>0.3</code>. Temperature controls the randomness of token sampling: <code>0</code> is near-deterministic (always the most likely next token), <code>1.0+</code> is creative and wandering. For a coding agent you want low — you want the same tool call for the same situation, not variety. <code>0.3</code> leaves a sliver of flexibility so the model can escape a repetitive rut.</p>
+
+<div class="box term">
+  <div class="label">Sampling terminology</div>
+  <p><strong>Temperature</strong> — flattens or sharpens the probability distribution over next tokens. <strong>top_p / nucleus sampling</strong> — sample only from the smallest set of tokens whose probabilities sum to <em>p</em>. <strong>top_k</strong> — sample only from the <em>k</em> most likely. <strong>Greedy decoding</strong> — always take the top token (temperature 0). <strong>Deterministic</strong> — same input, same output; even at temp 0 most providers don't fully guarantee it due to floating-point batching.</p>
+</div>
+
+<h4>Retries</h4>
+<p><code>Stream()</code> wraps <code>streamOnce()</code> with up to 4 attempts and linear backoff (2s, 4s, 6s). Two rules make it safe:</p>
+<ul>
+  <li><strong>Never retry after emission.</strong> If a single token or tool-call fragment already reached the user, a retry would duplicate it. The <code>emitted</code> flag forbids it.</li>
+  <li><strong>Never retry a 4xx.</strong> A bad key or malformed request will not fix itself. We mark those <code>fatal</code> — except <code>429 Too Many Requests</code>, which is genuinely transient.</li>
+</ul>
+
+
+<h2 id="streaming"><span class="num">05</span>Streaming &amp; SSE — reassembling a reply from fragments</h2>
+
+<p>We request <code>stream: true</code>, so instead of one JSON body we get <strong>Server-Sent Events</strong>: a long-lived HTTP response where each line looks like <code>data: {…}</code> and the stream ends with <code>data: [DONE]</code>.</p>
+
+<p>Each chunk carries a <strong>delta</strong> — an increment, not a full state. Our job is to fold hundreds of deltas back into one coherent message.</p>
+
+<div class="diagram"><pre>
+ data: {"choices":[{"delta":{"role":"assistant"}}]}
+ data: {"choices":[{"delta":{"reasoning_content":"The user wants"}}]}   ← thinking
+ data: {"choices":[{"delta":{"reasoning_content":" a test, so I"}}]}
+ data: {"choices":[{"delta":{"content":"I'll read"}}]}                  ← visible prose
+ data: {"choices":[{"delta":{"content":" main.go first."}}]}
+ data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_a1",
+              "function":{"name":"read_file","arguments":""}}]}}]}      ← tool call begins
+ data: {"choices":[{"delta":{"tool_calls":[{"index":0,
+              "function":{"arguments":"{\"pa"}}]}}]}                    ← args arrive
+ data: {"choices":[{"delta":{"tool_calls":[{"index":0,
+              "function":{"arguments":"th\":\"main.go\"}"}}]}}]}        ← …in pieces
+ data: {"choices":[{"finish_reason":"tool_calls"}]}
+ data: {"usage":{"prompt_tokens":2145,"completion_tokens":88}}          ← the bill
+ data: [DONE]
+</pre></div>
+
+<p>Three separate streams are interleaved in those chunks, and we handle each differently:</p>
+
+<table>
+<tr><th>Delta field</th><th>What it is</th><th>What we do</th></tr>
+<tr><td><code>reasoning_content</code></td><td>The model's private chain of thought</td><td>Count its characters for the live token estimate; never stored in history</td></tr>
+<tr><td><code>content</code></td><td>The visible answer</td><td>Concatenate into <code>out.Content</code>; print</td></tr>
+<tr><td><code>tool_calls[]</code></td><td>Function-call fragments</td><td>Accumulate by <code>index</code> into a map, then flatten in arrival order</td></tr>
+</table>
+
+<h4>The tool-call accumulator</h4>
+<p>This is the subtlest code in the client. Tool calls arrive shredded: the <code>id</code> and <code>name</code> come in the first fragment, then the <code>arguments</code> JSON string dribbles in character by character across many chunks. A parallel multi-tool reply interleaves fragments for <code>index: 0</code> and <code>index: 1</code>. So:</p>
+
+<pre><code>toolByIndex := map[<span class="kw">int</span>]*ToolCall{}   <span class="cm">// keyed by delta index</span>
+<span class="kw">var</span> order []<span class="kw">int</span>                       <span class="cm">// preserves first-seen ordering</span>
+
+<span class="cm">// id/name: set once, when non-empty</span>
+<span class="kw">if</span> tcd.Function.Name != <span class="s">""</span> { tc.Function.Name = tcd.Function.Name }
+<span class="cm">// arguments: always APPEND — it is a partial JSON string</span>
+tc.Function.Arguments += tcd.Function.Arguments</code></pre>
+
+<div class="box warn">
+  <div class="label">Why arguments is a string, not an object</div>
+  <p>The API sends <code>arguments</code> as a <strong>JSON-encoded string</strong>, not a JSON object. That is deliberate: a partially-streamed object would be unparseable, but a partially-streamed string is just a shorter string. You concatenate first and <code>json.Unmarshal</code> only once the stream is complete — which is exactly what <code>execTool</code> does. This is also why a model that hallucinates malformed JSON produces a parse error we must feed back to it rather than a crash.</p>
+</div>
+
+<h4>A 200 is not proof of success</h4>
+<p>One hard-won guard sits at the end of the read loop. Some gateways answer an <em>unrecognized path</em> with <code>200 OK</code> and an ordinary JSON error body — AWS Bedrock does exactly this:</p>
+<pre><code>{"Output":{"__type":"com.amazon.coral.service#UnknownOperationException"},"Version":"1.0"}</code></pre>
+<p>With no <code>data:</code> lines to parse, the old code returned an empty assistant message. Empty message plus no tool calls is indistinguishable from "task complete", so the agent printed <code>✓ done</code> for work that never happened. We now track whether any SSE frame was seen at all, and its absence is an error carrying a snippet of the body — plus, when the base URL ends in <code>/chat/completions</code>, the reason why. It is reported as <strong>non-retryable</strong>: a misconfigured URL will not fix itself in twelve seconds of backoff.</p>
+
+<h4>Interactive vs piped rendering</h4>
+<p>One nice design detail: in a real terminal we <em>don't</em> echo tokens as they stream. We only count them, so the animated spinner line ("<code>✻ Brewing… 12s · 4.1k tokens · Esc to pause</code>") can own the last line of the terminal without fighting streamed text for the cursor. Once the call returns and the spinner clears, we print the finished answer at once. When output is piped (CI, scripts), we fall back to true live streaming. Same backend, two presentation modes.</p>
+
+
+<h2 id="sysprompt"><span class="num">06</span>The system prompt — programming in English</h2>
+
+<p><span class="file">internal/agent/prompt.go</span></p>
+
+<p>The system prompt is the closest thing an agent has to source code for its <em>behavior</em>. It is built once, at startup, and sits at <code>history[0]</code> forever. Nothing ever removes it — not even compaction.</p>
+
+<p>Ours does four jobs. Recognizing these four categories is how you read or write any agent's prompt:</p>
+
+<table>
+<tr><th>Job</th><th>Our text</th><th>Term</th></tr>
+<tr><td><strong>Identity</strong></td><td>"You are claude-mini, a CLI coding agent…"</td><td>Role / persona priming</td></tr>
+<tr><td><strong>Environment</strong></td><td>Working directory, OS, available tool names</td><td>Context injection / grounding</td></tr>
+<tr><td><strong>Policy</strong></td><td>"Explore before editing", "make minimal targeted changes", "if a tool errors, say what went wrong and correct"</td><td>Behavioral constraints</td></tr>
+<tr><td><strong>Output contract</strong></td><td>End with <code>DONE: …</code> or <code>BLOCKED: …</code></td><td>Structured output / sentinel</td></tr>
+</table>
+
+<h4>The three lines that do the most work</h4>
+
+<pre><code><span class="cm">// 1. Forces tool use over guessing — grounding</span>
+"Explore before editing: read files and search the codebase."
+
+<span class="cm">// 2. Prevents silent failure — the #1 agent failure mode</span>
+"If a tool returns an error, say briefly what went wrong and try a
+ corrected approach. Never give up silently and never fabricate results."
+
+<span class="cm">// 3. Stops the loop from spinning forever</span>
+"When the task is complete, give a short summary.
+ Do not call tools when no further action is needed."</code></pre>
+
+<p>Note how tightly the prompt is coupled to the harness. <code>reg.Names()</code> is interpolated into the prompt, so adding a tool to the registry automatically mentions it. And the prompt explicitly teaches the model about our permission system — "<em>run_bash and run_server require the user's approval and may be declined; if declined, adapt rather than retrying the same thing</em>" — because the model has no other way to learn that rule.</p>
+
+<div class="box term">
+  <div class="label">Prompt terminology</div>
+  <p><strong>System prompt</strong> — standing instructions, highest priority. <strong>User prompt</strong> — the task. <strong>Prompt engineering</strong> — iterating on the wording to change behavior. <strong>Few-shot prompting</strong> — including worked examples (we use zero-shot: instructions only, no examples). <strong>Chain of thought (CoT)</strong> — "think step by step"; we ask for it explicitly, and reasoning models emit it in <code>reasoning_content</code>. <strong>Grounding</strong> — forcing answers to come from real observed data rather than model memory; our whole tool layer is a grounding mechanism. <strong>Hallucination</strong> — confidently stating something false; "never fabricate results" is our direct countermeasure. <strong>Prompt injection</strong> — untrusted text (a file, a web page) containing instructions the model then follows; every file we read is an injection surface, and our permission gate is the main mitigation.</p>
+</div>
+
+<h4>A second, hidden system prompt</h4>
+<p>Compaction (§10) builds its own tiny prompt with a completely different persona: <em>"You compress a coding agent's conversation history into a concise progress note…"</em>. This is a common pattern — one program, several prompts, each a small single-purpose "sub-agent" made of nothing but words.</p>
+
+
+<h2 id="tools"><span class="num">07</span>Tools / function calling — how text becomes action</h2>
+
+<p><span class="file">internal/tools/tools.go</span></p>
+
+<p><strong>Function calling</strong> (newer name: <strong>tool use</strong>) is the mechanism that turns a text generator into an actor. It works in three beats.</p>
+
+<h4>Beat 1 — we advertise capabilities as JSON Schema</h4>
+<p>On every request we send a <code>tools</code> array. Each entry is a name, a natural-language description, and a JSON Schema for its arguments:</p>
+
+<pre><code>{
+  <span class="k">"type"</span>: <span class="s">"function"</span>,
+  <span class="k">"function"</span>: {
+    <span class="k">"name"</span>: <span class="s">"edit_file"</span>,
+    <span class="k">"description"</span>: <span class="s">"Make a targeted edit by replacing an exact string…"</span>,
+    <span class="k">"parameters"</span>: {
+      <span class="k">"type"</span>: <span class="s">"object"</span>,
+      <span class="k">"properties"</span>: {
+        <span class="k">"path"</span>:        {<span class="k">"type"</span>:<span class="s">"string"</span>, <span class="k">"description"</span>:<span class="s">"file path to edit"</span>},
+        <span class="k">"old_string"</span>:  {<span class="k">"type"</span>:<span class="s">"string"</span>, <span class="k">"description"</span>:<span class="s">"exact text to find"</span>},
+        <span class="k">"new_string"</span>:  {<span class="k">"type"</span>:<span class="s">"string"</span>, <span class="k">"description"</span>:<span class="s">"replacement text"</span>},
+        <span class="k">"replace_all"</span>: {<span class="k">"type"</span>:<span class="s">"boolean"</span>, …}
+      },
+      <span class="k">"required"</span>: [<span class="s">"path"</span>, <span class="s">"old_string"</span>, <span class="s">"new_string"</span>]
+    }
+  }
+}</code></pre>
+
+<div class="box">
+  <div class="label">The description IS the API contract</div>
+  <p>The model has never seen our Go code. The <code>description</code> string is <em>the entire documentation</em> it will ever get. This is why ours carry behavioral hints, not just definitions:</p>
+  <p style="margin-top:8px"><code>run_bash</code>: "…<em>Not for long-running servers — use run_server for those.</em>"<br>
+  <code>run_server</code>: "…<em>Returns immediately with the PID and a log path; it does NOT block. Use run_bash to read the log afterwards.</em>"<br>
+  <code>edit_file</code>: "…<em>old_string must appear exactly once unless replace_all is true.</em>"</p>
+  <p style="margin-top:8px">Each of those sentences prevents a specific, observed failure. Writing tool descriptions is prompt engineering.</p>
+</div>
+
+<h4>Beat 2 — the model emits a structured request</h4>
+<p>Instead of prose it returns <code>tool_calls</code>. It has not <em>done</em> anything; it has produced a JSON object saying what it would like done. Nothing happens yet.</p>
+
+<h4>Beat 3 — we execute and report back</h4>
+<p><code>execTool</code> looks the name up in the registry, parses the arguments, optionally asks permission, runs the Go function, and pushes the output back as a <code>tool</code> message.</p>
+
+<div class="box">
+  <div class="label">The most important line in execTool</div>
+  <p>Every failure path <strong>returns a string, never an error</strong>:</p>
+  <pre style="margin:10px 0 6px"><code><span class="kw">return</span> fmt.Sprintf(<span class="s">"Error: invalid JSON arguments: %v"</span>, err)
+<span class="kw">return</span> fmt.Sprintf(<span class="s">"Error: no such tool %q"</span>, name)
+<span class="kw">return</span> <span class="s">"User declined this action. Do not retry it; consider an alternative."</span></code></pre>
+  <p>An error is not a crash — it is <strong>feedback</strong>. The model reads "old_string appears 3 times; pass replace_all or add more context" and fixes its own call on the next turn. This is <strong>self-correction</strong>, and it is the difference between a demo and a tool people use. A harness that crashes on tool errors caps out at trivial tasks.</p>
+</div>
+
+<h4>The Tool interface</h4>
+<p>Four methods, and the shape of them encodes our whole safety model:</p>
+<pre><code><span class="kw">type</span> Tool <span class="kw">interface</span> {
+    Def()      llm.Tool                              <span class="cm">// schema sent to the model</span>
+    Mutating() <span class="kw">bool</span>                                <span class="cm">// does it touch the real world?</span>
+    Preview(args)          (<span class="kw">string</span>, <span class="kw">error</span>)          <span class="cm">// what the human sees BEFORE approving</span>
+    Run(ctx, args)         (<span class="kw">string</span>, <span class="kw">error</span>)          <span class="cm">// do it; return text for the model</span>
+}</code></pre>
+<p><code>Mutating()</code> + <code>Preview()</code> exist for exactly one reason: a human must be able to see and veto a side effect before it happens. That is the <strong>human-in-the-loop</strong> pattern (§9).</p>
+
+<div class="box term">
+  <div class="label">Tool terminology</div>
+  <p><strong>Function calling / tool use</strong> — same thing, newer name. <strong>Tool definition / schema</strong> — the JSON Schema we advertise. <strong>Tool call</strong> — the model's request. <strong>Tool result / observation</strong> — what we send back ("observation" is the ReAct-paper word). <strong>tool_choice</strong> — <code>"auto"</code> (model decides, ours), <code>"none"</code> (forbid), <code>"required"</code> (must call something), or a named tool (force one). <strong>Parallel tool calls</strong> — several in one assistant message; we support this via the index-keyed accumulator and run them sequentially. <strong>MCP (Model Context Protocol)</strong> — an open standard for shipping tools as external servers so any agent can load them; our tools are hardcoded in Go instead.</p>
+</div>
+
+
+<h2 id="toolcatalog"><span class="num">08</span>Our tool catalog</h2>
+
+<p>Eight tools, registered in order in <code>tools.New()</code>. The split between read-only and mutating is the backbone of the safety model.</p>
+
+<table>
+<tr><th>Tool</th><th></th><th>What it does</th><th>Guardrail</th></tr>
+<tr><td><code>read_file</code></td><td><span class="pill ro">read</span></td><td>Read a text file, line-numbered and <strong>paged</strong> (<code>offset</code>/<code>limit</code>)</td><td>Path confined to project root; defaults to 400 lines so a big file cannot land in context whole</td></tr>
+<tr><td><code>list_dir</code></td><td><span class="pill ro">read</span></td><td>List a directory</td><td>Ignore rules applied (<code>.git</code>, <code>node_modules</code>, …)</td></tr>
+<tr><td><code>search</code></td><td><span class="pill ro">read</span></td><td>RE2 regex across the tree, returns <code>path:line:text</code></td><td>Max 200 hits, skips binaries and files &gt; 2 MB</td></tr>
+<tr><td><code>ask_user</code></td><td><span class="pill ro">read</span></td><td>Ask the human a question with 2–4 options</td><td>No side effect, so no approval needed</td></tr>
+<tr><td><code>write_file</code></td><td><span class="pill rw">write</span></td><td>Create or fully overwrite a file</td><td>Diff preview + approval + undo snapshot</td></tr>
+<tr><td><code>edit_file</code></td><td><span class="pill rw">write</span></td><td>Exact-string replace, falling back to an <strong>indentation-tolerant</strong> match</td><td>Uniqueness check + diff + approval + undo; returns a diff of what landed (§14)</td></tr>
+<tr><td><code>run_bash</code></td><td><span class="pill rw">write</span></td><td>Shell command, returns exit code + combined output</td><td>Approval, 5-min timeout, 30 KB output cap</td></tr>
+<tr><td><code>run_server</code></td><td><span class="pill rw">write</span></td><td>Start a background process (dev server)</td><td>Approval, logs to file, killed on exit</td></tr>
+</table>
+
+<h3>Three design decisions worth understanding</h3>
+
+<h4>1. Path confinement is enforced in Go, not in the prompt</h4>
+<p><code>Registry.resolve()</code> joins, cleans, then computes the relative path from root and rejects anything starting with <code>..</code>. A model that asks to read <code>../../.ssh/id_rsa</code> gets an error string, not a key. <strong>Never enforce security in the system prompt</strong> — prompts are advisory, code is not.</p>
+
+<h4>2. <code>edit_file</code> uses exact-string matching, not line numbers</h4>
+<p>Line numbers drift the moment anything above changes; models also hallucinate them. An exact-string match either hits or fails loudly. The uniqueness check ("appears 3 times; add more context") turns ambiguity into a correctable error instead of a silent wrong edit. This is the same design Claude Code uses, for the same reason.</p>
+
+<h4>3. <code>ask_user</code> is a tool, not a special case</h4>
+<p>Letting the model <em>call</em> for clarification is a genuinely elegant move. It turns "should I guess?" into a normal tool call the model decides to make, reinforced by the system prompt: <em>"If the request is ambiguous… call ask_user BEFORE doing work. Do not guess on decisions that change the outcome."</em> It is read-only, so it needs no approval — the interaction <em>is</em> the consent.</p>
+
+<h4>A note on the "bash" tool on Windows</h4>
+<p>We expose it to the model as <code>run_bash</code> but transparently dispatch to <code>powershell -NoProfile -NonInteractive -Command</code> on Windows. The model doesn't need to know. Keeping the tool surface stable while the implementation varies per platform is standard harness design — but it does mean the model may emit POSIX syntax on Windows, which the system prompt's OS line is there to discourage.</p>
+
+
+<h2 id="permission"><span class="num">09</span>Human in the loop — the permission system</h2>
+
+<p>An agent that can run arbitrary shell commands and overwrite files is, from a security standpoint, a remote code execution vulnerability you installed on purpose. The permission gate is what makes it acceptable.</p>
+
+<div class="diagram"><pre>
+   tool call arrives
+          │
+          ▼
+   Mutating() ?  ── no ──► run immediately  (read_file, search, list_dir, ask_user)
+          │
+         yes
+          ▼
+   Preview(args)          ← builds a colored LCS diff, or shows the command
+          │
+          ▼
+   scope := permScope(name, args)      ← "bash:git" / "file:main.go" / "server:api"
+          │
+          ▼
+   already approved for this scope? ── yes ──► show preview, run
+          │
+          no
+          ▼
+   ┌──────────────────────────────────────────┐
+   │  edit_file wants to proceed:             │
+   │    - old line                            │
+   │    + new line                            │
+   │  [y] yes  [n] no  [a] always for main.go │
+   └──────────────────────────────────────────┘
+       y → run once      n → "User declined…" back to the model
+       a → allowed[scope] = true for the rest of the session
+</pre></div>
+
+<h4>The clever part: scoped approval</h4>
+<p>"Always allow" is where most agent tools get dangerous, because it usually means "never ask about this tool again" — approve one <code>git status</code> and you've approved <code>rm -rf</code>. <code>permScope()</code> narrows the grant:</p>
+
+<table>
+<tr><th>Tool call</th><th>Scope key</th><th>"Always" actually means</th></tr>
+<tr><td><code>run_bash("git status")</code></td><td><code>bash:git</code></td><td>all <code>git</code> commands — not <code>rm</code>, not <code>curl</code></td></tr>
+<tr><td><code>edit_file("main.go", …)</code></td><td><code>file:main.go</code></td><td>edits to that one file</td></tr>
+<tr><td><code>run_server("npm run dev")</code></td><td><code>server:dev</code></td><td>that one named server</td></tr>
+</table>
+
+<p>It is derived from the first word of the command, so it is a heuristic, not a sandbox — <code>bash:git</code> still covers <code>git push --force</code>. But it converts a blanket grant into a bounded one, which is the right shape of the tradeoff for a local dev tool.</p>
+
+<h4>Denial is feedback, not failure</h4>
+<p>A declined tool returns <code>"User declined this action. Do not retry it; consider an alternative or ask what to do."</code> The wording is deliberate: without "do not retry", models loop on the same rejected call. That sentence is a bug fix written in English.</p>
+
+<div class="box term">
+  <div class="label">Terminology</div>
+  <p><strong>Human-in-the-loop (HITL)</strong> — a human approves consequential actions. <strong>Guardrails</strong> — the constraints around what the model may do. <strong>Sandboxing</strong> — isolating execution (containers, VMs). <strong>Autonomy level</strong> — how much runs without asking; ours is "approve mutations, auto-allow reads", with per-scope escalation. <strong>Blast radius</strong> — how much damage one bad action can do; path confinement and scoped approval both shrink it.</p>
+</div>
+
+
+<h2 id="context"><span class="num">10</span>Context window management &amp; compaction</h2>
+
+<p><span class="file">internal/agent/compact.go</span></p>
+
+<p>Because history is re-sent in full every turn (§2), an unmanaged agent dies of its own success: the longer it works, the more it costs, until it hits the context ceiling and hard-fails. We use two defenses at different timescales.</p>
+
+<h3>Defense 1 — clamping (every tool result)</h3>
+<pre><code><span class="kw">const</span> maxToolResultInHistory = <span class="n">24000</span>
+
+<span class="kw">func</span> clampForHistory(s <span class="kw">string</span>) <span class="kw">string</span> {
+    <span class="kw">if</span> len(s) &lt;= maxToolResultInHistory { <span class="kw">return</span> s }
+    <span class="kw">return</span> s[:maxToolResultInHistory] +
+      <span class="s">"\n… (truncated in history to save tokens; re-read a specific section if you need more)"</span>
+}</code></pre>
+<p>A 180 KB file read once would otherwise be re-uploaded on every subsequent turn for the rest of the session. Two details matter: the <strong>full</strong> result still goes to the transcript on disk (we lose nothing for debugging), and the truncation notice <em>tells the model what to do about it</em> — re-read a narrower section. A silent truncation would make the model reason about data it can't see.</p>
+
+<h3>Defense 2 — compaction (when the context gets big)</h3>
+<p>Once a turn's measured <code>prompt_tokens</code> crosses <strong>60,000</strong> — overridable with <code>CLAUDE_MINI_COMPACT_AT</code> — we fold old history into a summary.</p>
+<div class="box warn">
+  <div class="label">The threshold pulls two ways</div>
+  <p>This is a cost/context tradeoff, and the right answer depends entirely on where inference happens.</p>
+  <p style="margin-top:8px"><strong>On a caching provider, compact late.</strong> Compaction rewrites the prefix and <em>invalidates the cache</em>, so the next turn pays full price. Since the cached re-send was nearly free, compacting early is actively expensive.</p>
+  <p style="margin-top:8px"><strong>On local CPU inference, compact early.</strong> Prompt processing is the entire bottleneck — measured at ~15 tok/s on a laptop with no usable GPU, meaning a 20k-token turn spends <em>22 minutes</em> reading the prompt before emitting a single token. There, every token you can drop is worth more than any cache.</p>
+  <p style="margin-top:8px">Same variable, opposite directions. That is why it is a knob and not a constant.</p>
+</div>
+
+<div class="diagram"><pre>
+  BEFORE (crossed 60k):
+  [ system | user₁ assistant tool tool | user₂ assistant tool | user₃ assistant tool | user₄ … ]
+    keep      └──────────── summarize these ────────────┘   └──── keep verbatim ────┘
+                                                              (last 2 user turns)
+  AFTER:
+  [ system | assistant:"[earlier conversation compacted]\n\n<summary>" | user₃ … | user₄ … ]
+</pre></div>
+
+<p>Three properties make this safe:</p>
+<ul>
+  <li><strong>The cut lands on a user-message boundary.</strong> <code>compactionCut()</code> finds user-message indices and cuts at the N-th from the end. Cutting anywhere else could split an assistant's <code>tool_calls</code> from its <code>tool</code> results and break the invariant from §4.</li>
+  <li><strong>The system prompt is never touched.</strong> <code>history[0]</code> is preserved explicitly.</li>
+  <li><strong>Failure is a no-op.</strong> If the summarizer call errors or returns empty, we return without modifying history. Running slightly over budget beats silently destroying context.</li>
+</ul>
+
+<p>The summarizer is a <em>second, separate LLM call</em> with its own mini system prompt and <strong>no tools</strong>. It is told exactly what to preserve: <em>"the user's goals, files read or changed, key decisions and findings, commands run and their outcomes, and what still remains to be done."</em> That list is the design — it keeps the <em>plan</em> and drops the <em>transcript</em>.</p>
+
+<div class="box term">
+  <div class="label">Terminology</div>
+  <p><strong>Compaction / context compression</strong> — summarizing old turns to free tokens. <strong>Rolling / sliding window</strong> — just dropping the oldest messages (lossier; we don't do it). <strong>Summarization memory</strong> — the LangChain name for this pattern. <strong>Lost in the middle</strong> — the empirical finding that models attend worse to content in the middle of a long context, which is a second reason to compact rather than just grow. <strong>Context rot</strong> — accumulated stale/irrelevant context degrading answer quality.</p>
+</div>
+
+
+<h2 id="tokens"><span class="num">11</span>Tokens, usage &amp; cost</h2>
+
+<p><span class="file">internal/agent/cost.go</span></p>
+
+<p>A <strong>token</strong> is the unit an LLM reads and writes — roughly ¾ of an English word, or about 4 characters. Code tokenizes denser than prose. Everything is billed in tokens.</p>
+
+<table>
+<tr><th>Term</th><th>Meaning</th><th>Our field</th></tr>
+<tr><td><strong>Prompt / input tokens</strong></td><td>Everything we sent: system + history + tools</td><td><code>Usage.PromptTokens</code></td></tr>
+<tr><td><strong>Completion / output tokens</strong></td><td>What the model generated (incl. reasoning)</td><td><code>Usage.CompletionTokens</code></td></tr>
+<tr><td><strong>TTFT</strong></td><td>Time to first token — what streaming optimizes</td><td>(not measured)</td></tr>
+<tr><td><strong>Throughput</strong></td><td>Tokens per second after the first</td><td>(not measured)</td></tr>
+</table>
+
+<p>We get real counts by sending <code>stream_options: {include_usage: true}</code>, which makes the provider append a final usage chunk. Output tokens are typically 3–5× more expensive than input, which is why our defaults are <code>$0.60</code> in / <code>$2.20</code> out per million (overridable via <code>MINI_PRICE_IN</code> / <code>MINI_PRICE_OUT</code>).</p>
+
+<h4>Cached tokens are the only proof caching works</h4>
+<p><code>Usage</code> now also parses the cache fields both dialects report — OpenAI's <code>prompt_tokens_details.cached_tokens</code> and Anthropic's <code>cache_read_input_tokens</code>/<code>cache_creation_input_tokens</code> — and the footer surfaces the hit rate when there is one:</p>
+<pre><code>↑ 77.3k in (448 cached, 1%) · ↓ 648 out · 78.0k total · ~$0.0476 (est.)</code></pre>
+<p>Its <em>absence</em> is the diagnostic. No figure means the endpoint reported no cache hit, whatever the request asked for — which is exactly how you find out whether a given gateway passes cache directives through. A 1% hit rate, as above, means caching is effectively not working on that path.</p>
+
+<h4>Two different token numbers on screen</h4>
+<p>Worth knowing, because they disagree on purpose:</p>
+<ul>
+  <li><strong>The spinner's live number</strong> is an <em>estimate</em>: <code>base + len(runes)/4</code>. The real count doesn't exist until the stream ends, and a progress indicator needs a number <em>now</em>.</li>
+  <li><strong>The footer after each task</strong> is the <em>exact</em> figure the provider billed, accumulated in <code>Cost</code>.</li>
+</ul>
+<p>Estimate while running, truth when done — a reasonable pattern whenever the authoritative number arrives late.</p>
+
+
+<h2 id="persistence"><span class="num">12</span>Transcripts, resume &amp; undo</h2>
+
+<p><span class="file">internal/session/session.go</span></p>
+
+<h3>The transcript (JSONL)</h3>
+<p>Every session appends to <code>.mini_agent/sessions/YYYYMMDD-HHMMSS.jsonl</code> — one JSON object per line:</p>
+<pre><code>{<span class="k">"ts"</span>:<span class="s">"2026-09-20T10:02:11Z"</span>,<span class="k">"kind"</span>:<span class="s">"user"</span>,<span class="k">"payload"</span>:<span class="s">"add a test…"</span>}
+{<span class="k">"ts"</span>:<span class="s">"…"</span>,<span class="k">"kind"</span>:<span class="s">"assistant"</span>,<span class="k">"payload"</span>:{<span class="k">"role"</span>:<span class="s">"assistant"</span>,<span class="k">"tool_calls"</span>:[…]}}
+{<span class="k">"ts"</span>:<span class="s">"…"</span>,<span class="k">"kind"</span>:<span class="s">"tool_result"</span>,<span class="k">"payload"</span>:{<span class="k">"name"</span>:<span class="s">"read_file"</span>,<span class="k">"result"</span>:<span class="s">"…"</span>}}
+{<span class="k">"ts"</span>:<span class="s">"…"</span>,<span class="k">"kind"</span>:<span class="s">"compaction"</span>,<span class="k">"payload"</span>:{<span class="k">"summarized_messages"</span>:<span class="n">14</span>}}</code></pre>
+<p>JSONL is chosen for a reason: append-only, crash-safe (a truncated last line just gets skipped), and streamable without loading the file. Crucially it stores the <strong>full, unclamped</strong> tool results — the transcript is the ground truth, history is the lossy working set.</p>
+
+<h3>Resume — replaying a log into a valid conversation</h3>
+<p><code>/resume</code> finds the most recent <em>other</em> transcript (timestamp filenames sort lexically = chronologically), reads the records, and rebuilds <code>history</code> after the system prompt.</p>
+<p>The hard part is re-pairing. Tool results are logged flat, with no <code>tool_call_id</code>. <code>Resume()</code> reconstructs the pairing positionally: it holds the last assistant message's <code>tool_calls</code> as <code>pending</code> and consumes them in order with an index <code>pi</code>. Then the finishing move:</p>
+<pre><code><span class="cm">// Drop a dangling final assistant turn with unanswered tool calls.</span>
+<span class="kw">if</span> lastAssistant &gt;= <span class="n">0</span> &amp;&amp; pi &lt; len(pending) {
+    a.history = a.history[:lastAssistant]
+}</code></pre>
+<p>If the previous session was killed mid-tool, that assistant message has <code>tool_calls</code> with no results — an instant 400 on the next request (§4). So we amputate it. Better to lose one turn than to resume into a permanently broken conversation.</p>
+
+<h3>Undo — a shadow stack of file contents</h3>
+<p>Before <em>every</em> write, <code>RecordWrite()</code> snapshots the file's current bytes (and whether it existed at all) onto a stack. <code>/undo</code> pops one: restore the old bytes, or delete the file if it didn't exist before. In-memory only, single-level-per-pop, and independent of git — deliberately, since the project may not be a repo and the user may have uncommitted work.</p>
+
+
+<h2 id="interrupt"><span class="num">13</span>Interrupts &amp; the invariants they must not break</h2>
+
+<p>Pressing <strong>Esc</strong> mid-stream is a small feature with a surprisingly deep design, because a cancel that leaves history malformed bricks the session.</p>
+
+<h4>Cancellation plumbing</h4>
+<p><code>Run()</code> creates <code>runCtx, cancel := context.WithCancel(ctx)</code>. The <code>escWatcher</code> goroutine (installed from <code>main.go</code>, only when we're on a real TTY) opens the keyboard, waits for Esc, and calls <code>cancel()</code>. That context is threaded into the HTTP request, so the in-flight stream aborts immediately.</p>
+
+<h4>The stdin handoff</h4>
+<p>The watcher is installed <em>only around the streaming call</em> and released the moment it returns:</p>
+<pre><code>release := a.watch(cancel)      <span class="cm">// keyboard grabs stdin</span>
+msg, usage, err := a.client.Stream(…)
+release()                       <span class="cm">// keyboard lets go</span>
+<span class="cm">// …now the tool phase can safely use stdin for y/n/a prompts</span></code></pre>
+<p>Two readers on one stdin is a classic terminal bug — keystrokes vanish into the wrong consumer. Scoping the watcher to exactly the window where no prompt can appear eliminates it structurally.</p>
+
+<h4>Interrupting mid-tool-loop</h4>
+<p>This is the part that protects the invariant. If the user cancels while three tool calls are queued, we do <strong>not</strong> bail out. We iterate all of them, and for any that didn't run we push a synthetic result:</p>
+<pre><code><span class="kw">case</span> interrupted || runCtx.Err() != <span class="kw">nil</span>:
+    interrupted = <span class="kw">true</span>
+    result = <span class="s">"[interrupted by user before this tool ran]"</span></code></pre>
+<p>Every <code>tool_call</code> gets its matching <code>tool</code> message. History stays valid, so the user can type more instructions and the model picks up exactly where it stopped — including knowing which of its own requests never executed. Pause, not abort.</p>
+
+
+<h2 id="failure"><span class="num">14</span>Failure handling — the difference between a demo and a tool</h2>
+
+<p>Everything above assumes the model behaves. It often doesn't. A weak model mis-escapes JSON, retypes a tab as spaces, or repeats a doomed action forever. Each of those produced a real, observed failure, and each is answered in a different layer.</p>
+
+<div class="box">
+  <div class="label">The governing rule</div>
+  <p>A tool error is <strong>never</strong> a crash and <strong>never</strong> a bare "it failed". It is a message written for a reader who cannot see our source code, whose only chance to recover is the sentence we hand back. Every error string below is engineered to be acted on.</p>
+</div>
+
+<h3>Layer 1 — Malformed tool arguments</h3>
+<p><span class="file">internal/llm/sanitize.go</span></p>
+<p>Weaker models emit raw newlines and tabs inside JSON string literals, which makes <code>arguments</code> unparseable. Worse, an unserializable tool call that reaches <code>history</code> poisons <em>every later request</em> (§4's invariant). So repair happens at the boundary, before it is ever stored:</p>
+<pre><code>SanitizeToolCalls(&amp;out)   <span class="cm">// called in streamOnce, before the message is returned</span></code></pre>
+<p><code>RepairArguments</code> returns valid JSON unchanged, escapes stray control characters inside strings and returns that if it now parses, and otherwise substitutes a marker object. The marker turns an unrecoverable payload into a <em>correctable error</em> rather than a permanently broken conversation, and the agent answers it with the escaping rules spelled out: newline as <code>
+</code>, tab as <code>	</code>, quote as <code>\"</code>, backslash as <code>\</code>.</p>
+
+<h3>Layer 2 — Edits that nearly match</h3>
+<p><span class="file">internal/tools/file.go</span></p>
+<p>The most expensive failure this agent had: <code>edit_file</code> returning <code>old_string not found</code>, the model re-reading the same file, guessing again, and looping. Six retries and 40k tokens on one edit. Nearly every miss is whitespace — the model retypes a tab-indented line with spaces.</p>
+<p>Two changes, in order of preference:</p>
+<ul>
+  <li><strong>Accept it.</strong> If the block matches once indentation is normalized and the match is unambiguous, apply it, <em>re-indent the replacement to the file's own style</em>, and say so in the result so the substitution is visible rather than silent.</li>
+  <li><strong>Explain it.</strong> If it still cannot match, name the near-match line, what differs, and show the real text with tabs made visible:</li>
+</ul>
+<pre><code>old_string not found in login_controller.go, but line 140 matches once whitespace
+is ignored — this file indents with TAB characters, and old_string uses spaces.
+The file has:
+  		access, err := guviLib.LoginWithGUVI(email, pwd)
+Copy the text byte-for-byte from read_file (a tab must be written 	 in JSON),
+or use write_file to replace the whole region.</code></pre>
+<p>Two supporting changes remove the reason to re-read at all: <code>write_file</code> and <code>edit_file</code> now <strong>return a diff of what landed</strong>, and <code>read_file</code> is <strong>paged</strong> (<code>offset</code>/<code>limit</code>, line-numbered, numbers marked display-only) so a model can pull one function instead of a whole file.</p>
+
+<h3>Layer 3 — Doomed repetition</h3>
+<p><span class="file">internal/agent/agent.go</span></p>
+<p>Better messages help a model that <em>can</em> correct itself. Nothing helps one that can't — and nothing in the loop stopped it from trying forever. So identical failures are counted:</p>
+<pre><code>key := tc.Function.Name + " " + tc.Function.Arguments
+a.failed[key]++</code></pre>
+<p>The second identical failure appends a <code>STOP:</code> directive naming concrete alternatives (<code>write_file</code>, a smaller fragment, <code>ask_user</code>) and explicitly forbidding the re-read-and-retry pattern. The third demands <code>BLOCKED</code>. A <em>changed</em> argument counts as a new attempt, so genuine self-correction is never punished, and counts reset each task.</p>
+<p>This converts an open-ended spin into at most two attempts and a forced change of tactic — the difference between failing in thirty seconds and burning five minutes.</p>
+
+<div class="box term">
+  <div class="label">Terminology</div>
+  <p><strong>Self-correction</strong> — the model fixing its own call from an error message. <strong>Graceful degradation</strong> — accepting a near-miss instead of rejecting it. <strong>Loop / repetition detection</strong> — noticing the agent is stuck. <strong>Failing loudly</strong> — surfacing a problem where the cause is visible rather than three turns later. <strong>Poisoned context</strong> — one malformed message making every subsequent request fail.</p>
+</div>
+
+
+<h2 id="provider"><span class="num">15</span>Provider abstraction — one client, every model</h2>
+
+<p><span class="file">config.go</span></p>
+
+<p>Because we speak plain OpenAI-compatible HTTP, "switching AI provider" is just changing three strings: <code>BaseURL</code>, <code>APIKey</code>, <code>Model</code>. No adapter layer, no SDK per vendor.</p>
+
+<table>
+<tr><th>Preset</th><th>Base URL</th><th>Note</th></tr>
+<tr><td>OpenAdapter</td><td><code>api.openadapter.in/v1</code></td><td>our default; many models, one key</td></tr>
+<tr><td>OpenAI</td><td><code>api.openai.com/v1</code></td><td>GPT-4o, o3-mini</td></tr>
+<tr><td>OpenRouter</td><td><code>openrouter.ai/api/v1</code></td><td>aggregator — 100s of models incl. Claude</td></tr>
+<tr><td>Ollama</td><td><code>localhost:11434/v1</code></td><td>local inference, free, no key</td></tr>
+<tr><td>custom</td><td>anything</td><td>vLLM, LM Studio, Together, Groq…</td></tr>
+</table>
+
+<h4>Asking the provider what it actually serves</h4>
+<p>A model name is meaningless on its own — it is a menu item at a specific endpoint. <code>(BaseURL, APIKey)</code> is the account; <code>Model</code> is a string passed through. A hardcoded shortlist frozen at compile time therefore goes stale, and offers models the provider does not have.</p>
+<p>So we ask, via the OpenAI-compatible discovery endpoint:</p>
+<pre><code>GET {baseURL}/models   →   {"data":[{"id":"…"}, …]}</code></pre>
+<p>Three things follow from having the real catalog. <code>/model</code> lists what the provider genuinely offers, with curated presets it serves floated to the top. A typed name the catalog does not contain is <strong>challenged before it is accepted</strong>, instead of surfacing turns later as an opaque API error. And switching provider lands on a model the new endpoint actually serves rather than silently inheriting the previous one's — the bug that let a Gemini model id carry over to a Google endpoint that had never heard of it.</p>
+<p>Discovery is strictly best-effort: not every endpoint implements it and most require a valid key, so any error means "no catalog" and falls back to the built-in presets. Ids are kept <strong>verbatim</strong> — some providers namespace them (<code>models/gemini-2.0-flash</code>) and that prefix is part of what the chat endpoint expects.</p>
+
+<h4>The pasted-URL trap</h4>
+<p>Providers document their endpoint as the full <code>…/v1/chat/completions</code> path, so that is what people paste into <code>/provider</code>. But the client appends <code>/chat/completions</code> itself, producing a doubled path. <code>normalizeBase</code> strips the suffix on the way in — cheap insurance against a failure mode that, on at least one gateway, is silent (§5).</p>
+
+<h4>Prompt caching</h4>
+<p>Our request prefix is byte-stable by construction: the system prompt has no timestamp, tool schemas are fixed, history is only ever appended to, and a clamped tool result stays identical forever. That is exactly what a cache keys on. Marking breakpoints is opt-in via <code>CLAUDE_MINI_CACHE=1</code>, deliberately — a breakpoint sends message content as a structured block instead of a plain string, and an endpoint that does not understand that shape rejects the whole request. Since no gateway advertises whether it forwards cache directives, it stays something you turn on and confirm against the cached figure in the footer.</p>
+
+<p>Config precedence is layered, highest first: <strong>environment variables</strong> (<code>CLAUDE_MINI_BASE_URL</code> / <code>_API_KEY</code> / <code>_MODEL</code>) → <strong>saved config file</strong> → <strong>built-in defaults</strong>. Env-first is what makes the tool usable in CI without writing to disk. A <code>.env</code> file in the project is loaded at startup but never overrides an already-set variable.</p>
+
+<div class="box term">
+  <div class="label">Terminology</div>
+  <p><strong>Inference provider</strong> — whoever runs the model weights. <strong>Model gateway / aggregator</strong> — one API fronting many providers (OpenRouter, OpenAdapter). <strong>Local inference</strong> — the model runs on your machine (Ollama, llama.cpp, vLLM). <strong>OpenAI-compatible</strong> — exposes <code>/v1/chat/completions</code> with the same schema; the industry's lingua franca. <strong>Open-weights model</strong> — downloadable weights (Llama, Qwen, DeepSeek) vs API-only (GPT, Claude, Gemini). <strong>Quantization</strong> — shrinking weights to 8/4 bits so they fit in consumer RAM; why <code>qwen2.5-coder</code> runs on a laptop.</p>
+</div>
+
+
+<h2 id="glossary"><span class="num">16</span>Full AI glossary — mapped to our code</h2>
+
+<p>These are the words to use when you talk about this system. Anything marked <em>(not used)</em> is standard vocabulary you should still know.</p>
+
+<h3>Models &amp; inference</h3>
+<table>
+<tr><th>Term</th><th>Meaning</th><th>Where in our system</th></tr>
+<tr><td><strong>LLM</strong></td><td>Large Language Model — next-token predictor</td><td><code>client.Model</code></td></tr>
+<tr><td><strong>Inference</strong></td><td>Running the model to generate output</td><td>every <code>Stream()</code> call</td></tr>
+<tr><td><strong>Token</strong></td><td>~4 chars; the unit of billing and context</td><td><code>Usage</code></td></tr>
+<tr><td><strong>Tokenizer</strong></td><td>Text ↔ token-ID converter (BPE etc.)</td><td>server-side; we estimate at /4</td></tr>
+<tr><td><strong>Context window</strong></td><td>Max tokens per request</td><td><code>compactTriggerTokens</code></td></tr>
+<tr><td><strong>Temperature</strong></td><td>Sampling randomness</td><td><code>0.3</code>, hardcoded</td></tr>
+<tr><td><strong>Reasoning model</strong></td><td>Trained to emit long internal CoT first</td><td><code>reasoning_content</code> delta</td></tr>
+<tr><td><strong>Fine-tuning</strong></td><td>Further training on your data</td><td><em>(not used)</em></td></tr>
+<tr><td><strong>RLHF</strong></td><td>Reinforcement Learning from Human Feedback — how models are aligned to follow instructions</td><td><em>(why prompts work at all)</em></td></tr>
+</table>
+
+<h3>Prompting</h3>
+<table>
+<tr><th>Term</th><th>Meaning</th><th>Where</th></tr>
+<tr><td><strong>System prompt</strong></td><td>Standing instructions, top authority</td><td><code>prompt.go</code></td></tr>
+<tr><td><strong>Zero-shot / few-shot</strong></td><td>No examples / with examples</td><td>we are zero-shot</td></tr>
+<tr><td><strong>Chain of thought</strong></td><td>"Think step by step"</td><td>in our prompt + <code>reasoning_content</code></td></tr>
+<tr><td><strong>Grounding</strong></td><td>Answer from observed data, not memory</td><td>the entire tool layer</td></tr>
+<tr><td><strong>Hallucination</strong></td><td>Confident falsehood</td><td>"never fabricate results"</td></tr>
+<tr><td><strong>Prompt injection</strong></td><td>Untrusted text carrying instructions</td><td>every file we read; mitigated by approval gate</td></tr>
+<tr><td><strong>Structured output</strong></td><td>Forcing a machine-readable shape</td><td><code>DONE:</code> / <code>BLOCKED:</code> sentinels</td></tr>
+<tr><td><strong>Context injection</strong></td><td>Inserting live facts into the prompt</td><td>cwd, OS, tool names, <code>@file</code> expansion</td></tr>
+</table>
+
+<h3>Agents</h3>
+<table>
+<tr><th>Term</th><th>Meaning</th><th>Where</th></tr>
+<tr><td><strong>Agent</strong></td><td>Model + loop + tools</td><td><code>agent.go</code></td></tr>
+<tr><td><strong>ReAct</strong></td><td>Reason → Act → Observe, repeat</td><td><code>Run()</code>'s for-loop</td></tr>
+<tr><td><strong>Tool use / function calling</strong></td><td>Model requests an action in JSON</td><td><code>tools.Defs()</code></td></tr>
+<tr><td><strong>Observation</strong></td><td>The tool result fed back</td><td><code>role:"tool"</code> messages</td></tr>
+<tr><td><strong>Self-correction</strong></td><td>Model fixes itself from an error</td><td>errors returned as strings</td></tr>
+<tr><td><strong>Termination condition</strong></td><td>How the loop knows to stop</td><td><code>len(ToolCalls) == 0</code></td></tr>
+<tr><td><strong>HITL</strong></td><td>Human-in-the-loop approval</td><td><code>AskPermission</code></td></tr>
+<tr><td><strong>Memory</strong></td><td>What persists across turns/sessions</td><td><code>history</code> + JSONL transcript</td></tr>
+<tr><td><strong>Multi-agent / sub-agent</strong></td><td>Agents spawning agents</td><td><em>(not used — but our summarizer is a hint of it)</em></td></tr>
+<tr><td><strong>Planning</strong></td><td>Explicit plan before acting</td><td>prompt-level only, no formal planner</td></tr>
+<tr><td><strong>MCP</strong></td><td>Model Context Protocol — tools as pluggable servers</td><td><em>(not used; tools hardcoded)</em></td></tr>
+</table>
+
+<h3>Retrieval (the other half of the field)</h3>
+<table>
+<tr><th>Term</th><th>Meaning</th><th>Our stance</th></tr>
+<tr><td><strong>RAG</strong></td><td>Retrieval-Augmented Generation — fetch relevant docs, stuff into the prompt</td><td><em>not used</em></td></tr>
+<tr><td><strong>Embedding</strong></td><td>Text → vector capturing meaning</td><td><em>not used</em></td></tr>
+<tr><td><strong>Vector database</strong></td><td>Store/search embeddings by similarity</td><td><em>not used</em></td></tr>
+<tr><td><strong>Semantic vs keyword search</strong></td><td>By meaning vs by literal match</td><td>we do <strong>keyword</strong> (RE2 regex)</td></tr>
+<tr><td><strong>Chunking</strong></td><td>Splitting docs to fit context</td><td>our 24 KB / 200 KB clamps are a crude cousin</td></tr>
+</table>
+
+<div class="box">
+  <div class="label">Why no RAG?</div>
+  <p>Worth being able to defend, because people will ask. RAG guesses which snippets <em>might</em> be relevant and injects them upfront. <strong>Agentic search</strong> lets the model look things up itself, iteratively, based on what it just learned: <code>search</code> for a symbol → <code>read_file</code> the hit → follow an import → search again. For a codebase — where structure is explicit and grep is exact — agentic search is more precise and needs no index, no embedding pipeline and no staleness story. This is the same choice Claude Code makes. RAG earns its keep for fuzzy natural-language corpora, not for code.</p>
+</div>
+
+
+<h2 id="notbuilt"><span class="num">17</span>What we deliberately did NOT build</h2>
+
+<p>Knowing the gaps is as important as knowing the design — this is what separates our harness from a production one.</p>
+
+<table>
+<tr><th>Missing</th><th>What it would buy</th><th>Cost of adding</th></tr>
+<tr><td><strong>Parallel tool execution</strong></td><td>Speed when the model requests several reads at once</td><td>Low for read-only tools; unsafe for mutations, and near-zero payoff while tools are local file I/O</td></tr>
+<tr><td><strong>Real sandboxing</strong></td><td>Contain a destructive command</td><td>High — containers/VMs; permission gate is the current stand-in</td></tr>
+<tr><td><strong>Sub-agents</strong></td><td>Parallel exploration in isolated contexts</td><td>Medium — needs context isolation + result merging</td></tr>
+<tr><td><strong>MCP support</strong></td><td>Third-party tools without recompiling</td><td>Medium — a protocol client</td></tr>
+<tr><td><strong>Real tokenizer</strong></td><td>Accurate pre-flight budgeting</td><td>Low — a BPE library; today we estimate at /4</td></tr>
+<tr><td><strong>Streaming tool results</strong></td><td>Live output from long <code>run_bash</code></td><td>Medium — we buffer to completion</td></tr>
+<tr><td><strong>Evals</strong></td><td>Prove a prompt change helped</td><td>Medium — a task suite + scoring; <strong>the real blind spot</strong></td></tr>
+</table>
+
+<div class="box warn">
+  <div class="label">The honest weakness</div>
+  <p>Every behavioral decision in our system prompt and tool descriptions was made by intuition and anecdote. Without an <strong>eval suite</strong> — a fixed set of tasks scored automatically — there is no way to know whether the next prompt tweak helps or hurts. In production agent work, evals are the difference between engineering and superstition. It is the single most valuable thing this project is missing.</p>
+</div>
+
+
+<h2 id="curriculum"><span class="num">18</span>The course behind this project</h2>
+
+<p>If someone asked "what did you actually learn building this?", here is the syllabus, in the order the concepts build on each other.</p>
+
+<h4>Module 1 — The model is a text function</h4>
+<p>Stateless. No memory, no tools, no side effects. It maps a message array to more text. <em>Everything</em> else is the harness. <span class="file">§1, §2</span></p>
+
+<h4>Module 2 — Conversation state is your problem</h4>
+<p>History lives on the client and is re-sent in full every turn. That single fact generates the cost curve, the context ceiling, and the structural-validity rules. <span class="file">§2, §4</span></p>
+
+<h4>Module 3 — The chat protocol</h4>
+<p>Four roles, the <code>tool_call_id</code> pairing invariant, SSE deltas, and why <code>arguments</code> arrives as a string. <span class="file">§4, §5</span></p>
+
+<h4>Module 4 — Prompting as programming</h4>
+<p>Identity, environment, policy, output contract. Behavior is specified in English and it is real engineering — every sentence in our prompt exists to prevent an observed failure. <span class="file">§6</span></p>
+
+<h4>Module 5 — Tools turn text into action</h4>
+<p>Advertise a JSON Schema, receive a request, execute, report back. The description is the contract. Errors are feedback, not crashes — self-correction is what makes an agent useful. <span class="file">§7, §8</span></p>
+
+<h4>Module 6 — The agentic loop</h4>
+<p>Call → tool calls? → execute → append → repeat. Termination on empty tool calls. This is the whole of "agents". <span class="file">§1, §3</span></p>
+
+<h4>Module 7 — Safety is code, not prose</h4>
+<p>Path confinement, mutating/non-mutating split, diff previews, scoped approval. Enforce in Go; never rely on the prompt for security. <span class="file">§8, §9</span></p>
+
+<h4>Module 8 — Context economics</h4>
+<p>Clamp results, compact old turns, cut on safe boundaries, never drop the system prompt, fail soft. <span class="file">§10, §11</span></p>
+
+<h4>Module 9 — Durability</h4>
+<p>Append-only transcripts, resume with pairing repair, an undo stack independent of git, and interrupts that pause rather than corrupt. <span class="file">§12, §13</span></p>
+
+<h4>Module 10 — Failure is the design</h4>
+<p>Repair malformed arguments at the boundary; accept a near-miss and say you did; make every error a sentence the model can act on; count repeats and force a change of tactic. A harness is judged by how it behaves when the model is wrong, because it usually is. <span class="file">§14</span></p>
+
+<h4>Module 11 — Portability</h4>
+<p>One standard protocol, three swappable strings, layered config — plus asking the provider what it actually serves rather than trusting a hardcoded list. Same code from a cloud frontier model to a laptop running Ollama. <span class="file">§15</span></p>
+
+<hr>
+
+<div class="box">
+  <div class="label">The one-paragraph version</div>
+  <p>claude-mini keeps a growing array of chat messages in memory. Each turn it POSTs that whole array — plus eight JSON-Schema tool definitions — to an OpenAI-compatible endpoint, and reassembles the streamed SSE deltas into one message. If that message contains tool calls, it parses their JSON arguments, shows the human a diff and asks permission for anything mutating, executes real Go functions against the filesystem and shell, appends each result as a <code>tool</code> message, and loops. When the model replies with prose and no tool calls, the task is done. Along the way it clamps oversized results, summarizes old turns once context passes 60k tokens, tracks exact token usage from the provider, writes every event to an append-only JSONL transcript, keeps an undo stack of file contents, and handles Esc as a pause that leaves the conversation structurally valid. When the model misbehaves — malformed JSON arguments, an edit whose indentation does not match, the same doomed call issued over and over — it repairs, tolerates or escalates rather than crashing or spinning. And because it asks each provider which models it really serves, the same binary points at a frontier API or a laptop with equal confidence. That's the whole backend.</p>
+</div>
+
+<p style="color:var(--fg-faint); font-size:13px; font-family:var(--mono); margin-top:44px">
+Generated from the claude-mini source · <code>ARCHITECTURE.html</code> · open in any browser
+</p>
+
+</main>
+</div>
+</body>
+</html>
