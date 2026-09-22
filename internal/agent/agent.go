@@ -22,6 +22,7 @@ type Agent struct {
 	cost    *Cost
 	history []llm.Message
 	allowed map[string]bool // scope keys approved for the whole session
+	failed  map[string]int  // identical failing tool calls seen this task
 
 	// watch, if set, is invoked around each streaming call so the host can listen
 	// for an interrupt key (Esc) and cancel the turn. It returns a release func
@@ -38,6 +39,7 @@ func New(client *llm.Client, reg *tools.Registry, sess *session.Session, cost *C
 		sess:    sess,
 		cost:    cost,
 		allowed: map[string]bool{},
+		failed:  map[string]int{},
 		history: []llm.Message{
 			{Role: "system", Content: systemPrompt(root, reg.Names())},
 		},
@@ -83,6 +85,7 @@ func (a *Agent) Resume(records []session.Record) int {
 			if m.Role == "" {
 				m.Role = "assistant"
 			}
+			llm.SanitizeToolCalls(&m) // a logged turn may carry malformed arguments
 			lastAssistant = len(a.history)
 			a.history = append(a.history, m)
 			pending, pi = m.ToolCalls, 0
@@ -130,6 +133,7 @@ func (a *Agent) Run(ctx context.Context, userInput string) {
 
 	a.history = append(a.history, llm.Message{Role: "user", Content: userInput})
 	a.sess.Log("user", userInput)
+	clear(a.failed) // repeat-failure counts are per task, not per session
 
 	for {
 		stream := &ui.Streamer{}
@@ -254,6 +258,12 @@ func (a *Agent) execTool(ctx context.Context, tc llm.ToolCall) string {
 		ui.Errorf("could not parse arguments for %s: %v", name, err)
 		return fmt.Sprintf("Error: invalid JSON arguments: %v", err)
 	}
+	if _, bad := args[llm.MalformedArgsKey]; bad {
+		ui.Errorf("%s: arguments were not valid JSON — asking the model to retry", name)
+		return "Error: your tool-call arguments were not valid JSON and could not be recovered. " +
+			`Inside a JSON string a newline must be written \n, a tab \t, a quote \" and a backslash \\. ` +
+			"Re-issue this call with the arguments properly escaped."
+	}
 
 	ui.ToolHeader(name, argSummary(args))
 
@@ -281,10 +291,41 @@ func (a *Agent) execTool(ctx context.Context, tc llm.ToolCall) string {
 	result, err := tool.Run(ctx, args)
 	if err != nil {
 		ui.Errorf("%s failed: %v", name, err)
-		return fmt.Sprintf("Error: %v", err)
+		return a.noteFailure(tc, fmt.Sprintf("Error: %v", err))
 	}
-	ui.ToolResult(result)
+	ui.ToolOutput(result)
 	return result
+}
+
+// repeatFailureLimit is how many times the exact same failing call is answered
+// with its plain error before the agent starts insisting on a different approach.
+const repeatFailureLimit = 2
+
+// noteFailure records that a tool call failed and escalates the message when the
+// identical call keeps failing. Nothing else in the loop stops an agent from
+// repeating a doomed action: a model that cannot produce a matching old_string
+// will re-read and retry until the user gives up, burning a turn and the whole
+// context each time. Counting (tool, arguments) pairs converts that open-ended
+// spin into at most a couple of attempts followed by a forced change of tactic.
+func (a *Agent) noteFailure(tc llm.ToolCall, msg string) string {
+	key := tc.Function.Name + "\x00" + tc.Function.Arguments
+	a.failed[key]++
+	n := a.failed[key]
+	if n < repeatFailureLimit {
+		return msg
+	}
+
+	ui.Errorf("that same %s call has now failed %d times — telling the model to change approach", tc.Function.Name, n)
+	escalation := fmt.Sprintf(
+		"\n\nSTOP: this identical %s call has failed %d times. Do NOT issue it again, and do not "+
+			"simply re-read the same file hoping the text changed — it has not. Change approach now: "+
+			"use a different tool (write_file to replace the whole region), target a smaller and more "+
+			"distinctive fragment, or call ask_user to ask how to proceed.",
+		tc.Function.Name, n)
+	if n > repeatFailureLimit {
+		escalation += " You have already been warned once; if you cannot proceed, reply with BLOCKED and explain why."
+	}
+	return msg + escalation
 }
 
 // permScope derives a session-approval key (and a human label) for a mutating

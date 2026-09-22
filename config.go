@@ -116,7 +116,20 @@ func providerFor(base string) (provider, bool) {
 	return provider{}, false
 }
 
-func normalizeBase(s string) string { return strings.TrimRight(strings.TrimSpace(s), "/") }
+// normalizeBase canonicalizes a provider base URL. Providers document their
+// endpoint as the full ".../v1/chat/completions" path, so that is what people
+// paste — but we append "/chat/completions" ourselves. Left alone it produces a
+// doubled path, which some gateways (AWS Bedrock) answer with 200 OK and a
+// non-stream body, turning a typo into a task that silently does nothing.
+func normalizeBase(s string) string {
+	s = strings.TrimRight(strings.TrimSpace(s), "/")
+	for _, suffix := range []string{"/chat/completions", "/completions"} {
+		if strings.HasSuffix(strings.ToLower(s), suffix) {
+			return strings.TrimRight(s[:len(s)-len(suffix)], "/")
+		}
+	}
+	return s
+}
 
 func firstNonEmpty(vals ...string) string {
 	for _, v := range vals {

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/eiannone/keyboard"
@@ -307,10 +308,13 @@ func switchProvider(client *llm.Client) {
 		ui.Errorf("no API key set for %s — use /login before sending a task.", base)
 	}
 
-	// Land on a model that exists for this provider.
-	if p, found := providerFor(base); found && len(p.Models) > 0 {
-		client.Model = p.Models[0]
-	}
+	// Land on a model this provider actually serves. Asking the endpoint matters
+	// most for custom URLs, which have no preset list: without it the new provider
+	// silently inherits the previous one's model and the next task dies on an
+	// opaque API error far from the cause.
+	live, _ := client.ListModels(context.Background())
+	client.Model = defaultModelFor(base, client.Model, live)
+
 	if err := saveActive(base, client.Model); err != nil {
 		ui.Errorf("switched for now, but couldn't save it: %v", err)
 	}
@@ -349,13 +353,44 @@ func providerBaseFromChoice(choice string, presets []provider) (string, bool) {
 // switchModel shows a provider-aware shortlist and switches the active model. The
 // user may also type any model id. The change is persisted and applies next turn.
 func switchModel(client *llm.Client) {
-	models := modelChoices(client.BaseURL, client.Model)
+	live, err := client.ListModels(context.Background())
+	if err != nil {
+		live = nil // discovery is best-effort; fall back to the built-in presets
+	}
+	choices := modelChoices(client.BaseURL, client.Model, live)
+
+	shown := choices
+	if len(shown) > maxModelChoices {
+		shown = shown[:maxModelChoices]
+	}
+
 	q := fmt.Sprintf("Pick a model, or type any model name  (now: %s)", client.Model)
-	choice := strings.TrimSpace(ui.AskUser(q, models))
+	if len(live) > 0 {
+		q = fmt.Sprintf("Pick a model  (%d offered by %s · now: %s)",
+			len(live), providerLabel(client.BaseURL), client.Model)
+	}
+	if len(choices) > len(shown) {
+		q += fmt.Sprintf("\n  │ showing the first %d — type a name to use any other", len(shown))
+	}
+
+	choice := strings.TrimSpace(ui.AskUser(q, shown))
 	if choice == "" || choice == client.Model {
 		ui.Info("  Keeping %s.", client.Model)
 		return
 	}
+
+	// Catch a name this provider doesn't serve here, where the cause is obvious.
+	// Otherwise it surfaces turns later as a raw API error with nothing tying it
+	// back to this choice. Still allow an override: not every endpoint lists its
+	// full catalog.
+	if len(live) > 0 && !slices.Contains(live, choice) {
+		ui.Errorf("%s doesn't list a model named %q.", providerLabel(client.BaseURL), choice)
+		if !confirmYes("  Use it anyway?") {
+			ui.Info("  Keeping %s.", client.Model)
+			return
+		}
+	}
+
 	client.Model = choice
 	if err := saveModelPref(choice); err != nil {
 		ui.Success("Now using %s (this session)", choice)
@@ -364,31 +399,105 @@ func switchModel(client *llm.Client) {
 	}
 }
 
-// modelChoices returns the shortlist for /model: the CLAUDE_MINI_MODELS override if
-// set, else the active provider's suggested models, else just the current model.
-// The current model is always selectable.
-func modelChoices(base, current string) []string {
-	var list []string
+// maxModelChoices bounds the numbered menu. Aggregators list hundreds of models;
+// printing them all would bury the prompt. Anything not shown is still reachable
+// by typing its name.
+const maxModelChoices = 30
+
+// confirmYes asks a yes/no question, defaulting to no (listed first, so the safe
+// answer is also option 1).
+func confirmYes(question string) bool {
+	switch strings.ToLower(strings.TrimSpace(ui.AskUser(question, []string{"no", "yes"}))) {
+	case "yes", "y":
+		return true
+	}
+	return false
+}
+
+// modelChoices returns the shortlist for /model, in precedence order:
+//
+//  1. the CLAUDE_MINI_MODELS override — an explicit user choice, never second-guessed
+//  2. the provider's live catalog, with any curated presets it actually serves first
+//  3. the built-in preset list, when discovery is unavailable
+//  4. just the current model
+//
+// The current model is always present and always first. live is the discovery
+// result, or nil when the endpoint doesn't support it.
+func modelChoices(base, current string, live []string) []string {
 	if v := strings.TrimSpace(os.Getenv(envModels)); v != "" {
+		var override []string
 		for _, p := range strings.Split(v, ",") {
 			if p = strings.TrimSpace(p); p != "" {
-				list = append(list, p)
+				override = append(override, p)
 			}
 		}
-	} else if p, ok := providerFor(base); ok {
-		list = append(list, p.Models...)
+		return withCurrentFirst(override, current)
 	}
-	found := false
-	for _, m := range list {
-		if m == current {
-			found = true
-			break
+
+	var preset []string
+	if p, ok := providerFor(base); ok {
+		preset = p.Models
+	}
+	if len(live) == 0 {
+		return withCurrentFirst(preset, current)
+	}
+
+	// Curated models the provider actually serves lead, so known-good picks stay at
+	// the top of a long catalog; everything else it offers follows, which is what
+	// gives a custom endpoint a real menu instead of a one-item list.
+	list := make([]string, 0, len(live))
+	seen := map[string]bool{}
+	for _, m := range preset {
+		if slices.Contains(live, m) && !seen[m] {
+			list = append(list, m)
+			seen[m] = true
 		}
 	}
-	if !found && current != "" {
-		list = append([]string{current}, list...)
+	for _, m := range live {
+		if !seen[m] {
+			list = append(list, m)
+			seen[m] = true
+		}
 	}
-	return list
+	return withCurrentFirst(list, current)
+}
+
+// withCurrentFirst puts current at the head of list and removes any duplicate of
+// it, so the active model is always selectable as option 1.
+func withCurrentFirst(list []string, current string) []string {
+	out := make([]string, 0, len(list)+1)
+	if current != "" {
+		out = append(out, current)
+	}
+	for _, m := range list {
+		if m != current {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
+// defaultModelFor picks the model to land on after switching provider: keep the
+// current one when the new provider serves it, else the first curated preset it
+// serves, else whatever it lists first. With no catalog it falls back to the
+// preset list, and finally to leaving the model alone.
+func defaultModelFor(base, current string, live []string) string {
+	preset, _ := providerFor(base) // zero value has no Models, which is fine
+	if len(live) == 0 {
+		if len(preset.Models) > 0 {
+			return preset.Models[0]
+		}
+		return current
+	}
+	if slices.Contains(live, current) {
+		return current
+	}
+	for _, m := range preset.Models {
+		if slices.Contains(live, m) {
+			return m
+		}
+	}
+	return live[0]
 }
 
 // showConfig prints the active provider, base URL, model and a masked key.
